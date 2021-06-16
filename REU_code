@@ -1,0 +1,294 @@
+#import libraries
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
+import random
+
+#write data to file
+f = open("test.txt", "w")
+f.write("my first file\n")
+f.close()
+
+#initialize other lists
+Max_Energy_list = []
+Single_Max_Energy_list = []
+used_houses = []
+
+#define global variables
+#budget per house
+#number of houses
+
+#num of hosues
+HOUSES = 100
+#cost of 1kwh lost
+curtailed_cost = .1
+#hours to consider
+HOURS = 24
+#max energy value for all houses
+Max_Energy = 3500
+#max energy value for single house
+Single_Max_Energy = Max_Energy / HOUSES
+
+MIN_BUDGET = 0
+MAX_BUDGET = 4
+#budget = 1
+
+JFIbudget_list_mem = []
+JFIbudget_list = []
+
+JFIeng_list_mem = []
+JFIeng_list = []
+
+def main():
+    budget = 1
+    while(budget >= MIN_BUDGET and budget <= MAX_BUDGET + 1):
+        #initialize lists for House class
+        house_list = []
+        energy_list = []
+        budget_list = []
+        og_energy_list = []
+        num_curtailed = 0
+        #print budget
+        print(budget)
+        #make the onject with the gien budget
+        make_object(House, og_energy_list, energy_list, num_curtailed, budget, house_list)
+
+        total_energy_list = get_total_energy_list(house_list)
+        total_eng_list_mem, curtailed_eng_list_mem, og_eng_list_mem = curtailment_memory(total_energy_list, budget, house_list)
+        # plot(total_eng_list_mem)
+        # histogram(curtailed_eng_list_mem)
+        #get JFI for energy and budget
+        jains_bud_mem = calc_jains_budget(budget, budget_list, house_list)
+        jains_eng_mem, curtailment_norm_list_mem = calc_jains_energy(og_eng_list_mem, curtailed_eng_list_mem)
+
+        print("Starting with a budget of $", budget)
+        print("JFI of budget with memory:", jains_bud_mem)
+        print("JFI of energy curtailed with memory:", jains_eng_mem)
+        print("list of energy curtailed from each house with memory:", curtailed_eng_list_mem)
+        print("total energy list", total_eng_list_mem)
+        print("energy list of house 0 after curtailment:", house_list[0].energy_list)
+        print("energy list of house 0 before curtailment:", house_list[0].og_energy_list)
+
+        total_eng_list, curtailed_eng_list, og_eng_list = curtailment(total_energy_list, budget, house_list)
+        # plot(total_eng_list)
+        # histogram(curtailed_eng_list)
+        jains_bud = calc_jains_budget(budget, budget_list, house_list)
+        jains_eng, curtailment_norm_list = calc_jains_energy(og_eng_list, curtailed_eng_list)
+
+        print("Starting with a budget of $", budget)
+        print("JFI of budget no memory:", jains_bud)
+        print("JFI of energy no memory:", jains_eng)
+        print("list of energy curtailed from each house with memory:", curtailed_eng_list)
+        print("total energy list", total_eng_list)
+        print("energy list of house 0 after curtailment:", house_list[0].energy_list)
+        print("energy list of house 0 before curtailment:", house_list[0].og_energy_list)
+
+        budget += 1
+#function to calculate energy of house in 1 hr
+def get_energy_list():
+    energy_list = []
+    for i in range(HOURS + 1):
+        #make up extra energy on house for hour
+        extra_energy = np.random.rand(1)*10
+        #if no sunlight, no energy
+        if i < 6 or i > 18:
+            energy = 0
+            energy_list.append(energy)
+        else:
+            #max(0, --) is making sure there is never a negative energy
+            #max energy at noon, less on either side of noon, + random energy data
+            energy = max(0, pow(6, 2)-pow((i-12), 2) + extra_energy)
+            #get energy value from array returned by pow
+            energy = energy[0]
+            #add energy value to the list of the house
+            energy_list.append(energy)
+    #return the energy list to the house class
+    return energy_list
+
+#define house class
+class House:
+  def __init__(house, og_energy_list, energy_list, num_curtailed, budget):
+    #initialize lists for House class
+    energy_list = []
+    budget_list = []
+    og_energy_list = []
+
+    #initialize the aspects of the class
+    house.og_energy_list = og_energy_list
+    house.energy_list = energy_list
+    house.num_curtailed = num_curtailed
+    house.budget = budget
+
+
+def make_object(House, og_energy_list, energy_list, num_curtailed, budget, house_list):
+    #make a list of house objects
+    for j in range(HOUSES):
+        house = House(og_energy_list, energy_list, num_curtailed, budget)
+        energy_list =  get_energy_list()
+        stagnant_eng_list = tuple(energy_list)
+        house.og_energy_list = stagnant_eng_list
+        house.energy_list = energy_list
+        #add house object to list of houses
+        house_list.append(house)
+
+#make a mega list of total energy over day
+def get_total_energy_list(house_list):
+    #initialize total_energy_list
+    total_energy_list = []
+    #for each hour
+    for i in range(HOURS + 1):
+        #initialize total energy for each hour
+        total_energy = 0
+        #for each house
+        for k in range(len(house_list)):
+            #get energy of that house for that hour
+            energy = house_list[k].energy_list[i]
+            #add to total energy
+            total_energy += energy
+        #add energy of i hour to total energy list
+        total_energy_list.append(total_energy)
+    return total_energy_list
+
+def curtailment_memory(total_energy_list, budget, house_list):
+    #for each hour
+    for i in range(HOURS + 1):
+        #ideal_energy_list, single_ideal_eng_list = get_ideal_list()
+        #if the total energy is greater than it should be,
+        while total_energy_list[i] > Max_Energy:
+            #no -1 here, works
+            num_house = random.randint(0, HOUSES - 1)
+            #if the house's budget has not been spent and the house has not been used in that round
+            if (house_list[num_house].budget - curtailed_cost >= 0 and num_house not in used_houses):
+                #add used house
+                used_houses.append(num_house)
+                house_list[num_house].num_curtailed += 1
+                #set the energy of that house for the given hour to zero
+                house_list[num_house].energy_list[i] = 0
+                #subtract the cost of energy lost from their budget
+                house_list[num_house].budget = house_list[num_house].budget - curtailed_cost
+                total_energy_list = get_total_energy_list(house_list)
+            #if all houses have been curtailed from, clear record in list
+            if (len(used_houses) == len(house_list)):
+                used_houses.clear()
+    curtailed_eng_list, og_eng_list = get_curtailment_lists(house_list)
+    return total_energy_list, curtailed_eng_list, og_eng_list
+
+def curtailment(total_energy_list, budget, house_list):
+    #for each hour
+    for i in range(HOURS + 1):
+        #ideal_energy_list, single_ideal_eng_list = get_ideal_list()
+        #if the total energy is greater than it should be,
+        while total_energy_list[i] > Max_Energy:
+            #no -1 here, works
+            num_house = random.randint(0, HOUSES - 1)
+            #if the house's budget has not been spent and the house has not been used in that round
+            if (house_list[num_house].budget - curtailed_cost >= 0):
+                #add used house
+                house_list[num_house].num_curtailed += 1
+                #set the energy of that house for the given hour to zero
+                house_list[num_house].energy_list[i] = 0
+                #subtract the cost of energy lost from their budget
+                house_list[num_house].budget = house_list[num_house].budget - curtailed_cost
+                total_energy_list = get_total_energy_list(house_list)
+    curtailed_eng_list, og_eng_list = get_curtailment_lists(house_list)
+    return total_energy_list, curtailed_eng_list, og_eng_list
+
+def get_curtailment_lists(house_list):
+    #calculate amount of energy curtailed from each house and add to list
+    for i in range(HOUSES):
+        #get lists for specific house
+        hs_englist_curt = house_list[i].energy_list
+        hs_englist_og = house_list[i].og_energy_list
+        house_energy_curt = 0
+        house_energy_og = 0
+        curtailed_eng = 0
+        for j in range(HOURS + 1):
+            #sum energy curtailed from that house over day
+            house_energy_curt += hs_englist_curt[j]
+            #sum energy over day w/out curtailment
+            house_energy_og += hs_englist_og[j]
+            #get difference in energy
+            curtailed_eng = house_energy_og - house_energy_curt
+            #add to list of curtiled energy for each house
+            curtailed_eng_list[i] = curtailed_eng
+            #add originial energy of house to house_energy_og_list
+            og_eng_list[i] = house_energy_og
+
+    return(curtailed_eng_list, og_eng_list)
+
+#make a list of energy to be plotted
+for i in range(HOURS + 1):
+    Max_Energy_list.append(Max_Energy)
+    Single_Max_Energy_list.append(Single_Max_Energy)
+#plot results
+def plot(total_en_list):
+    # Plot in different subplots
+    fig2, (ax1, ax2) = plt.subplots(1, 2)
+    #plot total energy
+    ax1.plot(Max_Energy_list)
+    ax1.plot(total_en_list)
+    #plot specific house
+    #ax2.plot(house_list[0].energy_list)
+    #ax2.plot(house_list[0].og_energy_list)
+    #ax2.plot(Single_Max_Energy_list)
+
+    fig2.show()
+    fig2.savefig("Total_energy.png")
+
+def histogram(curtailed_eng_list):
+    plt.hist(curtailed_eng_list, bins = 10)
+    plt.show()
+#calculate jains fairness index for budget
+def calc_jains_budget(budget, budget_list, house_list):
+    sum_x = 0
+    sum_x_sqd = 0
+    for i in range(len(house_list)):
+        budget_list.append(house_list[i].budget)
+        sum_x += budget_list[i]
+        sum_x_sqd += (budget_list[i]**2)
+    jains = (sum_x**2) / (HOUSES * sum_x_sqd)
+    return(jains)
+
+curtailed_eng_list = []
+og_eng_list = []
+for i in range(HOUSES):
+    curtailed_eng_list.append(0)
+    og_eng_list.append(0)
+
+#calculate jains fairness index for budget for curtailed energy
+def calc_jains_energy(og_eng_list, curtail_list):
+    #calc JFI of curtailed energy
+    sum_x = 0
+    sum_x_sqd = 0
+    curtailment_norm_list = []
+    for i in range (HOUSES):
+        curtailment_norm = (og_eng_list[i] - curtail_list[i]) / og_eng_list[i]
+        curtailment_norm_list.append(curtailment_norm)
+        sum_x += curtailment_norm
+        sum_x_sqd += curtailment_norm**2
+
+    jains = (sum_x**2) / (HOUSES * sum_x_sqd)
+    return(jains, curtailment_norm_list)
+
+main()
+
+
+#while (Bud_range == True):
+    # k = 1
+    # global budget
+    # while (k >= MIN_BUDGET and k <= MAX_BUDGET + 1):
+    #     budget = k
+        #get list of number of times each house was curtailed
+        #get total energy list and plot data
+#function to check if budget is still in range
+# def check_range(budget, in_range):
+#     #if budet was in range for the last trial
+#     while (in_range == True):
+#         #if budget is in range, add 1 to budget
+#         if (budget >= MIN_BUDGET and budget <= MAX_BUDGET):
+#             budget += 1
+#             return budget, True
+#         #if budget is out of range, set in_range = False to end while loop
+#         else:
+#             in_range = False
+#             return budget, False

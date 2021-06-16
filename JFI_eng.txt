@@ -1,0 +1,8 @@
+Average JFI of Energy Curtailed w/out Memory
+_____________________________________
+						Max Energy
+
+			1000			1500			2000			2500			3000			3500			4000
+
+
+Starting Budget  

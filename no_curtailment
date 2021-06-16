@@ -1,0 +1,162 @@
+#import libraries
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
+import random
+
+#initialize lists for House class
+house_list = []
+time_list = []
+energy_list = []
+og_energy_list = []
+Max_Energy_list = []
+budget_list = []
+
+#define global variables
+#budget per house
+budget = 7
+#number of houses
+HOUSES = 100
+#cost of 1kwh lost
+curtailed_cost = .1
+#hours to consider
+HOURS = 24
+#max energy value for all houses
+Max_Energy = 1000
+#max energy value for single house
+Single_Max_Energy = Max_Energy / HOUSES
+
+def main():
+    total_eng_list = curtailment()
+    plot(total_eng_list)
+    #make a list of final budgets
+    jains_bud = calc_jains_budget()
+    jains_eng = calc_jains_energy()
+    print(jains_bud)
+    print(jains_eng)
+    print(len(house_list))
+
+#function to calculate energy of house in 1 hr
+def get_energy_list():
+    energy_list = []
+    for i in range(HOURS + 1):
+        #make up extra energy on house for hour
+        extra_energy = np.random.rand(1)*10
+        #if no sunlight, no energy
+        if i < 6 or i > 18:
+            energy = 0
+            energy_list.append(energy)
+        else:
+            #max(0, --) is making sure there is never a negative energy
+            #max energy at noon, less on either side of noon, + random energy data
+            energy = max(0, pow(6, 2)-pow((i-12), 2) + extra_energy)
+            #get energy value from array returned by pow
+            energy = energy[0]
+            #add energy value to the list of the house
+            energy_list.append(energy)
+    #return the energy list to the house class
+    return energy_list
+
+#define house class
+class House:
+  def __init__(house, og_energy_list, energy_list, budget):
+    #initialize the aspects of the class
+    house.og_energy_list = og_energy_list
+    house.energy_list = energy_list
+    house.budget = budget
+
+#make a list of house objects
+for j in range(HOUSES + 1):
+    house = House(og_energy_list, energy_list, budget)
+    energy_list =  get_energy_list()
+    stagnant_eng_list = tuple(energy_list)
+    house.og_energy_list = stagnant_eng_list
+    house.energy_list = energy_list
+    #add house object to list of houses
+    house_list.append(house)
+#make a mega list of total energy over day
+def get_total_energy_list():
+    #initialize total_energy_list
+    total_energy_list = []
+    #for each hour
+    for i in range(HOURS + 1):
+        #initialize total energy for each hour
+        total_energy = 0
+        #for each house
+        for k in range(len(house_list)):
+            #get energy of that house for that hour
+            energy = house_list[k].energy_list[i]
+            #add to total energy
+            total_energy += energy
+        #add energy of i hour to total energy list
+        total_energy_list.append(total_energy)
+    return total_energy_list
+
+def curtailment():
+    #for each hour
+    for i in range(HOURS + 1):
+        #get the total energy list
+        total_energy_list = get_total_energy_list()
+        #ideal_energy_list, single_ideal_eng_list = get_ideal_list()
+        #if the total energy is greater than it should be,
+        while total_energy_list[i] > Max_Energy:
+            num_house = random.randint(0, HOUSES)
+            #if the house's budget has not been spent and the house has not been used in that round
+            if (house_list[num_house].budget - curtailed_cost >= 0):
+                #set the energy of that house for the given hour to zero
+                house_list[num_house].energy_list[i] = 0
+                #subtract the cost of energy lost from their budget
+                house_list[num_house].budget = house_list[num_house].budget - curtailed_cost
+                total_energy_list = get_total_energy_list()
+    print(total_energy_list)
+    print(house_list[0].energy_list)
+    print(house_list[0].og_energy_list)
+    return(total_energy_list)
+
+#make a list of energy to be plotted
+for i in range(HOURS + 1):
+    Max_Energy_list.append(Max_Energy)
+print(Max_Energy_list)
+
+def plot(total_en_list):
+    # Plot in different subplots
+    fig2, (ax1, ax2) = plt.subplots(1, 2)
+    #plot total energy
+    ax1.plot(Max_Energy_list)
+    ax1.plot(total_en_list)
+    #plot specific house
+    ax2.plot(house_list[0].energy_list)
+    ax2.plot(house_list[0].og_energy_list)
+    #ax2.plot(Single_Max_Energy)
+
+    fig2.show()
+    fig2.savefig("Total_energy.png")
+
+def calc_jains_budget():
+    sum_x = 0
+    sum_x_sqd = 0
+    for i in range(len(house_list)):
+        budget_list.append(house_list[i].budget)
+        sum_x += budget_list[i]
+        sum_x_sqd += (budget_list[i]**2)
+    jains = (sum_x**2) / (HOUSES * sum_x_sqd)
+
+    return(jains)
+def calc_jains_energy():
+    eng_list = []
+    sum_x = 0
+    sum_x_sqd = 0
+    single_house_energy = 0
+    #may need to be len(houses), check
+    for i in range(HOUSES):
+        working_list = house_list[i].energy_list
+        for i in range(HOURS + 1):
+            single_house_energy += working_list[i]
+        sum_x += single_house_energy
+        sum_x_sqd += (single_house_energy**2)
+        print(sum_x)
+    jains = (sum_x**2) / (HOUSES * sum_x_sqd)
+
+    return(jains)
+
+main()
