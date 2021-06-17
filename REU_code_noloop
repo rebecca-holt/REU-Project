@@ -18,17 +18,18 @@ MIN_BUDGET = 1
 MAX_BUDGET = 10
 #amount budget increases in loop when calculating curtailments
 budget_increase = 4
-
-#energy limits
+#energy limits, amount energy limit changes in loop
 MIN_ENG_LIM = 200
 MAX_ENG_LIM = 350
 ENG_CHANGE = 50
 
-#array of size of given number of houses in sqr ft
-mean_size = 4500
-SD = 1000
-array_sqr_ft = np.random.normal(mean_size, SD, HOUSES)
-list_sqr_ft = array_sqr_ft.tolist()
+#array of size of given number of houses in m^2
+#mean_size = 400
+mean_num_SP = 20
+SD = 5
+#array_sqr_ft = np.random.normal(mean_size, SD, HOUSES)
+array_num_SP = (np.random.normal(mean_num_SP, SD, HOUSES)) // 1
+list_num_SP = array_num_SP.tolist()
 
 graph_max_eng = 300
 graph_budget = 9
@@ -180,7 +181,7 @@ def init_main_lists(Max_Energy):
         og_eng_list.append(0)
         num_curtailed_list.append(0)
         budget_list.append(0)
-        size_factor = list_sqr_ft[i] / mean_size
+        size_factor = list_num_SP[i] / mean_num_SP
         size_factor_list.append(size_factor)
     #make a list of energy to be plotted
     for i in range(HOURS):
@@ -194,7 +195,7 @@ def init_main_lists(Max_Energy):
 def get_energy_list(extra_energy_list, house_index, size_matters):
     energy_list = []
     S_energy_list = []
-    size_factor = list_sqr_ft[house_index] / mean_size
+    size_factor = list_num_SP[house_index] / mean_num_SP
     for i in range(HOURS):
         #if no sunlight, no energy
         if i < 6 or i > 18:
