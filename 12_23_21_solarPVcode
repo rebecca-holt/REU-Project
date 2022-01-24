@@ -1,0 +1,542 @@
+#import libraries
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
+import random
+
+#define global variables
+#num of hosues
+HOUSES = 100
+#cost of 1kwh lost
+curtailed_cost = .1
+#number of kWh curtialed for one hour
+constant_curtailed_energy  = 5
+#hours to consider
+HOURS = 24
+#min and max budget for each house
+MIN_BUDGET = 1
+MAX_BUDGET = 10
+#amount budget increases in loop when calculating curtailments
+budget_increase = 4
+#energy limits, amount energy limit changes in loop
+MIN_ENG_LIM = 200
+MAX_ENG_LIM = 350
+ENG_CHANGE = 50
+
+#array of size of given number of houses in m^2
+#mean_size = 400
+mean_num_SP = 20
+SD = 5
+#array_sqr_ft = np.random.normal(mean_size, SD, HOUSES)
+array_num_SP = (np.random.normal(mean_num_SP, SD, HOUSES)) // 1
+list_num_SP = array_num_SP.tolist()
+
+graph_max_eng = 300
+graph_budget = 9
+
+def main():
+    #make up extra energy on house for hour that will be the same for every curtailment scheme in this run
+    extra_energy_list = []
+    for i in range (0, HOURS):
+        extra_energy = np.random.rand(1)*10
+        extra_energy_list.append(extra_energy)
+    #calculate the curtailment and JFI for various parameters
+    #make_energy_graph means graph will be made, memory means houses that have been curatiled from are noted, size matters means house size varies.
+    make_energy_graph, size_matters, has_memory, curtail_percentage, favor_budget = True, True, True, True, True
+    S_JFI_bud_list_mem, S_JFI_eng_list_mem, n, limit_list = curtailment_choices(extra_energy_list, size_matters, has_memory, curtail_percentage, favor_budget, make_energy_graph)
+
+    make_energy_graph, size_matters, has_memory, curtail_percentage, favor_budget = False, True, False, True, True
+    S_JFI_bud_list, S_JFI_eng_list, n, limit_list = curtailment_choices(extra_energy_list, size_matters, has_memory, curtail_percentage, favor_budget, make_energy_graph)
+
+    make_energy_graph, size_matters, has_memory, curtail_percentage, favor_budget = False, False, False, True, True
+    JFI_bud_list, JFI_eng_list, n, limit_list = curtailment_choices(extra_energy_list, size_matters, has_memory, curtail_percentage, favor_budget, make_energy_graph)
+
+    make_energy_graph, size_matters, has_memory, curtail_percentage, favor_budget = False, False, True, True, True
+    JFI_bud_list_mem, JFI_eng_list_mem, n, limit_list = curtailment_choices(extra_energy_list, size_matters, has_memory, curtail_percentage, favor_budget, make_energy_graph)
+
+    #divide the lists of JFI into chunks to be graphed when size matters
+    S_listof_JFIbud_lists = list(divide_chunks(S_JFI_bud_list, n))
+    S_listof_JFIeng_lists = list(divide_chunks(S_JFI_eng_list, n))
+    S_listof_JFIbud_mem_lists = list(divide_chunks(S_JFI_bud_list_mem, n))
+    S_listof_JFIeng_mem_lists = list(divide_chunks(S_JFI_eng_list_mem, n))
+
+    #divide the lists of JFI into chunks to be graphed when size does not matter
+    listof_JFIbud_lists = list(divide_chunks(JFI_bud_list, n))
+    listof_JFIeng_lists = list(divide_chunks(JFI_eng_list, n))
+    listof_JFIbud_mem_lists = list(divide_chunks(JFI_bud_list_mem, n))
+    listof_JFIeng_mem_lists = list(divide_chunks(JFI_eng_list_mem, n))
+
+    # print(listof_JFIbud_lists)
+    # print(listof_JFIbud_mem_lists)
+    # print(listof_JFIeng_lists)
+    # print(listof_JFIeng_mem_lists)
+    # print("now with size\n")
+    # print(S_listof_JFIbud_lists)
+    # print(S_listof_JFIbud_mem_lists)
+    # print(S_listof_JFIeng_lists)
+    # print(S_listof_JFIeng_mem_lists)
+
+    # #plot the JFI for budget and energy when size matters
+    JFI_plot(S_listof_JFIbud_lists, "JFI of Budget with Varied House Size", limit_list)
+    # JFI_plot(S_listof_JFIeng_lists, "JFI of Energy with Varied House Size", limit_list)
+    # JFI_plot(S_listof_JFIbud_mem_lists, "JFI of Budget w Memory and Varied House Size", limit_list)
+    # JFI_plot(S_listof_JFIeng_mem_lists, "JFI of Energy w Memory and Varied House Size", limit_list)
+    #
+    # #plot the JFI for budget and energy when size does not matter
+    # JFI_plot(listof_JFIbud_lists, "JFI of Budget", limit_list)
+    # JFI_plot(listof_JFIeng_lists, "JFI of Energy", limit_list)
+    # JFI_plot(listof_JFIbud_mem_lists, "JFI of Budget w Memory", limit_list)
+    # JFI_plot(listof_JFIeng_mem_lists, "JFI of Energy w Memory", limit_list)
+
+    # #this is average at every budget so not very specific. Might want to do individual budget lists as well
+    # percent_jfi, smaller_JFI = compare_JFI(S_JFI_bud_list, JFI_bud_list)
+    # if (smaller_JFI == S_JFI_bud_list):
+    #     print("JFI of Budget with Varied House Size has a", percent_jfi, "% less fair average than JFI of Budget without Varied House Size")
+    # elif (smaller_JFI == JFI_bud_list):
+    #     print("JFI of Budget has a", percent_jfi, "% less fair average JFI than JFI of Budget with Varied House Size")
+    # else:
+    #     print("JFI of Budget is equal to JFI of Budget with Varied House Size")
+    #
+    # #this is average at every budget so not very specific. Might want to do individual budget lists as well
+    # percent_jfi, smaller_JFI = compare_JFI(S_JFI_bud_list_mem, JFI_bud_list_mem)
+    # if (smaller_JFI == S_JFI_bud_list_mem):
+    #     print("JFI of Budget with Varied House Size with Memory has a", percent_jfi, "% less fair average than JFI of Budget without Varied House Size with Memory ")
+    # elif (smaller_JFI == JFI_bud_list_mem):
+    #     print("JFI of Budget with Memory  has a", percent_jfi, "% less fair average JFI than JFI of Budget with Varied House Size with Memory ")
+    # else:
+    #     print("JFI of Budget with Memory is equal to JFI of Budget with Varied House Size with Memory")
+    #
+    #write_to_files(listof_JFIbud_lists, file_name, limit_list)
+#percent_jfi, smaller_JFI = compare_JFI(S_JFI_bud_list_mem, JFI_bud_list_mem)
+def curtailment_choices(extra_energy_list, size_matters, has_memory, curtail_percentage, favor_budget, make_energy_graph):
+    budget = MIN_BUDGET
+    #initialize lists that will be used to plot JFI points later
+    JFI_bud_list = []
+    JFI_eng_list = []
+
+    #while the budget is within a given range
+    while(budget >= MIN_BUDGET and budget <= MAX_BUDGET):
+        #make mist of every max energy value
+        limit_list = []
+        #n i the number of max energy values, used to break up long list later
+        num_limits = 0
+        #percet is the amount to curtail by
+        percent = .50
+        #for a given max energy value,
+        for k in range(MIN_ENG_LIM, MAX_ENG_LIM, ENG_CHANGE):
+            Max_Energy = k
+            #initialize constants and lists for each trial
+            num_curtailed, Single_Max_Energy, house_list, energy_list, budget_list, og_eng_list, Max_Energy_list, Single_Max_Energy_list, \
+            num_curtailed_list, curtailed_eng_list, total_energy_list, size_factor_list = init_main_lists(Max_Energy)
+            #make house object
+            make_object(House, og_eng_list, energy_list, num_curtailed, budget, house_list, extra_energy_list, size_matters, size_factor_list)
+            #________________________
+            num_curtailed_list, budget_list, curtailed_eng_list, og_eng_list = get_curtailment_lists(curtailed_eng_list, og_eng_list, num_curtailed_list, budget_list, house_list)
+            #print("before curtailment:", budget_list)
+            #get total energy for day
+            total_energy_list = get_total_energy_list(house_list)
+            #curtail without memory
+            total_eng_list, curtailed_eng_list, og_eng_list, num_curtailed_list, budget_list = curtailment(total_energy_list, curtailed_eng_list, og_eng_list, \
+            budget_list, budget, num_curtailed_list, house_list, Max_Energy, size_matters, curtail_percentage, favor_budget, percent, has_memory, make_energy_graph)
+            #calculate the jains fairness index for budget and energy
+            jains_budget, jains_energy, curtailment_norm_list = calc_jains(budget, budget_list, house_list, og_eng_list, curtailed_eng_list)
+            #add JFIs to list to plot later
+            JFI_bud_list.append(jains_budget)
+            JFI_eng_list.append(jains_energy)
+
+            limit_list.append(k)
+            num_limits += 1
+
+            #get list of budgets for next part of for loop
+            num_curtailed_list, budget_list, curtailed_eng_list, og_eng_list = get_curtailment_lists(curtailed_eng_list, og_eng_list, num_curtailed_list, budget_list, house_list)
+
+            if (make_energy_graph == True and k == graph_max_eng and budget == graph_budget):
+                plot(total_energy_list, total_eng_list, Max_Energy, Max_Energy_list)
+                plot_histogram(house_list, num_curtailed_list)
+
+            #print("after curtailemnt", budget_list)
+        #increase budget value by some value
+        budget += budget_increase
+        #print("new budget value")
+    return JFI_bud_list, JFI_eng_list, num_limits, limit_list
+
+def init_main_lists(Max_Energy):
+    #make empty lists and initialize variables to be used in functions
+    num_curtailed = 0
+    Single_Max_Energy = Max_Energy / HOUSES
+    house_list = []
+    energy_list = []
+    budget_list = []
+    og_eng_list = []
+    Max_Energy_list = []
+    Single_Max_Energy_list = []
+    num_curtailed_list = []
+    curtailed_eng_list = []
+    total_energy_list = []
+    size_factor_list = []
+
+    #make empty lists to be filled in other functions
+    for i in range(0, HOUSES):
+        curtailed_eng_list.append(0)
+        og_eng_list.append(0)
+        num_curtailed_list.append(0)
+        budget_list.append(0)
+        size_factor = list_num_SP[i] / mean_num_SP
+        size_factor_list.append(size_factor)
+    #make a list of energy to be plotted
+    for i in range(HOURS):
+        Max_Energy_list.append(Max_Energy)
+        Single_Max_Energy_list.append(Single_Max_Energy)
+
+    return num_curtailed, Single_Max_Energy, house_list, energy_list, budget_list, og_eng_list, Max_Energy_list, Single_Max_Energy_list, \
+    num_curtailed_list, curtailed_eng_list, total_energy_list, size_factor_list
+
+#function to calculate energy of house in 1 hr
+def get_energy_list(extra_energy_list, house_index, size_matters):
+    energy_list = []
+    S_energy_list = []
+    size_factor = list_num_SP[house_index] / mean_num_SP
+    for i in range(HOURS):
+        #if no sunlight, no energy
+        if i < 6 or i > 18:
+            energy = 0
+            energy_list.append(energy)
+            S_energy_list.append(energy)
+        else:
+            energy = (((6**2)-((i-12)**2) + extra_energy_list[i]) / 10)
+            S_energy = (((6**2)-((i-12)**2) + extra_energy_list[i]) / 10) * size_factor
+            #get energy value from array returned by pow
+            #add energy value to the list of the house
+            energy = energy[0]
+            S_energy = S_energy[0]
+            energy_list.append(energy)
+            S_energy_list.append(S_energy)
+    #return the energy list to the house class
+    if size_matters == False:
+        return energy_list
+    else:
+        return S_energy_list
+#define house class
+class House:
+  def __init__(house, og_eng_list, energy_list, num_curtailed, budget):
+    #initialize the aspects of the class
+    house.og_eng_list = og_eng_list
+    #list of ints
+    house.energy_list = energy_list
+    house.num_curtailed = num_curtailed
+    house.budget = budget
+
+def make_object(House, og_eng_list, energy_list, num_curtailed, budget, house_list, extra_energy_list, size_matters, size_factor_list):
+    for j in range(0, HOUSES):
+        house = House(og_eng_list, energy_list, num_curtailed, budget)
+        energy_list =  get_energy_list(extra_energy_list, j, size_matters)
+        stagnant_eng_list = tuple(energy_list)
+        house.og_eng_list = stagnant_eng_list
+        house.energy_list = energy_list
+        house.budget = budget * size_factor_list[j]
+        #add house object to list of houses
+        house_list.append(house)
+
+#sent to this function every hour to calculate percent to curtail for each house in that hour
+def percent_curtailment(house_list, hour, percent):
+    eng_to_curtail_list = []
+    for i in range (0, HOUSES):
+        energy_to_curtail = (house_list[i].energy_list[hour] * percent)
+        eng_to_curtail_list.append(energy_to_curtail)
+    return eng_to_curtail_list
+
+#make a mega list of total energy over day
+def get_total_energy_list(house_list):
+    total_energy_list = []
+    #for each hour
+    for i in range(HOURS):
+        #initialize total energy for each hour
+        total_energy = 0
+        #for each house
+        #used to be range(len(house_list))
+        for k in range(0, HOUSES):
+            #get energy of that house for that hour
+            energy = house_list[k].energy_list[i]
+            #add to total energy
+            total_energy += energy
+        #add energy of i hour to total energy list
+        total_energy_list.append(total_energy)
+    return total_energy_list
+
+def curtailment(total_energy_list, curtailed_eng_list, og_eng_list, budget_list, budget, num_curtailed_list, house_list, \
+Max_Energy, size_matters, curtail_percentage, favor_budget, percent, has_memory, make_energy_graph):
+    used_houses = []
+    houses_left = []
+    for r in range(0, HOUSES):
+        houses_left.append(r)
+    #get list of budgets
+    more_possibilities = True
+    #for each hour
+    for j in range(0, HOURS):
+        eng_to_curtail_list = percent_curtailment(house_list, j, percent)
+        #if the total energy is greater than it should be,
+        while (total_energy_list[j] > Max_Energy and more_possibilities == True):
+            # if favor_budget == False:
+                #generate a random number of a house to be curtailed from
+            num_house = random.choice(houses_left)
+            # if favor_budget == True:
+            #     #generate a random number of a house to be curtailed from
+            #     bud_max = max(budget_list)
+            #     num_house = budget_list.index(bud_max)
+                # if num_house not in houses_left:
+                # #
+                # while num_house not in houses_left:
+                #     budget_list[num_house] = 0
+                #     bud_max = max(budget_list)
+                #     num_house = budget_list.index(bud_max)
+
+            #if the size of the house does not change curtailment,
+            if (curtail_percentage == False):
+                #save the remaining budget and energy as variables
+                remaining_bud = house_list[num_house].budget
+                remaining_eng = house_list[num_house].energy_list[j]
+                #if the constant_curtailed_energy does not use up the budget, then curtail that amount of energy
+                if (remaining_bud - (curtailed_cost * constant_curtailed_energy) >= 0 and remaining_eng - constant_curtailed_energy >= 0):
+                    house_list[num_house].num_curtailed += house_list[num_house].num_curtailed + 1
+                    #subtract the cost of energy lost from their budget
+                    house_list[num_house].budget = house_list[num_house].budget - (curtailed_cost * constant_curtailed_energy)
+                    #set the energy of that house for the given hour to updated value
+                    house_list[num_house].energy_list[j] = house_list[num_house].energy_list[j] - constant_curtailed_energy
+                    #if keeping track of houses that have been used, take house from houses_left to used_houses
+                    if (has_memory == True):
+                        max_bud = budget_list.index(num_house)
+                        #print(max_bud)
+                        used_houses.append(num_house)
+                        used_houses_budgets.append(max_bud)
+                        houses_left.remove(num_house)
+                        budget_list.remove(max_bud)
+                #if the percent amount curtailed is too much, but you can use up the energy and the budget will still be > 0, use up budget
+                elif (remaining_bud - (curtailed_cost * remaining_eng) >= 0):
+                    house_list[num_house].num_curtailed += house_list[num_house].num_curtailed + 1
+                    #subtract all possible enrgy, effectively using up energy
+                    house_list[num_house].budet = house_list[num_house].budget - (curtailed_cost * remaining_eng)
+                    #set the energy of that house for the given hour to zero
+                    house_list[num_house].energy_list[j] = 0
+                    houses_left.remove(num_house)
+                #if the percent amount curtailed is too much and curtailing the rest of the energy is also too much, use up budget
+                else:
+                    house_list[num_house].num_curtailed += house_list[num_house].num_curtailed + 1
+                    house_list[num_house].energy_list[j] = house_list[num_house].energy_list[j] - (remaining_bud / curtailed_cost)
+                    house_list[num_house].budget = 0
+                    houses_left.remove(num_house)
+
+            if (curtail_percentage == True):
+                #index to houses given amount to curtail
+                amount_curtailed = eng_to_curtail_list[num_house]
+                #save the remaining budget and energy as variables
+                remaining_bud = house_list[num_house].budget
+                remaining_eng = house_list[num_house].energy_list[j]
+                #if the percent amount curtailed does not use up the budget, then curtail that amount of energy
+                if (remaining_bud - (curtailed_cost * amount_curtailed) >= 0 and remaining_eng - amount_curtailed >= 0):
+                    house_list[num_house].num_curtailed = house_list[num_house].num_curtailed + 1
+                    #subtract the cost of energy lost from their budget
+                    house_list[num_house].budget = house_list[num_house].budget - (curtailed_cost * amount_curtailed)
+                    #set the energy of that house for the given hour to updated value
+                    house_list[num_house].energy_list[j] = house_list[num_house].energy_list[j] - amount_curtailed
+                    if (has_memory == True):
+                        used_houses.append(num_house)
+                        houses_left.remove(num_house)
+                #if the percent amount curtailed is too much, but you can use up the energy and the budget will still be > 0, use up budget
+                elif (remaining_bud - (curtailed_cost * remaining_eng) >= 0):
+                    house_list[num_house].num_curtailed += house_list[num_house].num_curtailed + 1
+                    #subtract all possible enrgy, effectively using up energy
+                    house_list[num_house].budet = house_list[num_house].budget - (curtailed_cost * remaining_eng)
+                    #set the energy of that house for the given hour to zero
+                    house_list[num_house].energy_list[j] = 0
+                    houses_left.remove(num_house)
+                #if the percent amount curtailed is too much and curtailing the rest of the energy is also too much, use up budget
+                else:
+                    house_list[num_house].num_curtailed += house_list[num_house].num_curtailed + 1
+                    house_list[num_house].energy_list[j] = house_list[num_house].energy_list[j] - (remaining_bud / curtailed_cost)
+                    house_list[num_house].budget = 0
+                    houses_left.remove(num_house)
+            if (has_memory == True):
+                #if all houses have been curtailed from, clear record in list
+                if (len(houses_left) == 0 and len(used_houses) != 0):
+                    houses_left = used_houses
+                    used_houses.clear()
+            #if both lists are empty, curtailment is not possible anymore and while loop terminates.
+            if(len(houses_left) == 0 and len(used_houses) == 0):
+                more_possibilities = False
+
+            total_energy_list = get_total_energy_list(house_list)
+            #you should look at this
+    num_curtailed_list, budget_list, curtailed_eng_list, og_eng_list = get_curtailment_lists(curtailed_eng_list, og_eng_list, num_curtailed_list, budget_list, house_list)
+    return total_energy_list, curtailed_eng_list, og_eng_list, num_curtailed_list, budget_list
+
+def get_curtailment_lists(curtailed_eng_list, og_eng_list, num_curtailed_list, budget_list, house_list):
+    #calculate amount of energy curtailed from each house and add to list
+    for i in range(0, HOUSES):
+        #make a list of the number of times each house was curtailed from
+        num_curtailed_list[i] = house_list[i].num_curtailed
+        #make list of budgets of each house
+        budget_list[i] = house_list[i].budget
+        #get lists for specific house
+        hs_englist_curt = house_list[i].energy_list
+        hs_englist_og = house_list[i].og_eng_list
+        house_energy_curt = 0
+        house_energy_og = 0
+        curtailed_eng = 0
+        #find the amount of energy curtailed for each house over the day
+        for j in range(HOURS):
+            #sum energy curtailed from that house over day
+            house_energy_curt += hs_englist_curt[j]
+            #sum energy over day w/out curtailment
+            house_energy_og += hs_englist_og[j]
+        #get difference in energy
+        curtailed_eng = house_energy_og - house_energy_curt
+        #add to list of curtiled energy for each house
+        curtailed_eng_list[i] = curtailed_eng
+        #add originial energy of house to house_energy_og_list
+        og_eng_list[i] = house_energy_og
+    #enumerate(myList) gives you a list containing tuples of (index, value):
+    #You sort the list by passing it to sorted and specifying a function to extract the sort key
+    #(the second element of each tuple; that's what the lambda is for.
+    #Finally, the original index of each sorted element is extracted using the [i[0] for i in ...] list comprehension
+    #https://stackoverflow.com/questions/6422700/how-to-get-indices-of-a-sorted-array-in-python
+    #print([i[0] for i in sorted(enumerate(budget_list), key=lambda x:x[1])])
+    budget_list_enumerated = sorted(enumerate(budget_list), key=lambda x: x[1])
+    print(budget_list_enumerated[0])
+    print(x[1])
+    return(num_curtailed_list, budget_list, curtailed_eng_list, og_eng_list)
+#calculate jains fairness index for budget
+def calc_jains(budget, budget_list, house_list, og_eng_list, curtail_list):
+    sum_x = 0
+    sum_x_sqd = 0
+    curtailment_norm_list = []
+    #calculate JFI of budget
+    for i in budget_list:
+        sum_x += i
+        sum_x_sqd += (i**2)
+    try:
+        jains_budget = (sum_x**2) / (HOUSES * sum_x_sqd)
+    except ZeroDivisionError:
+        jains_budget = 1.0
+    #calculate JFI of energy
+    sum_x = 0
+    sum_x_sqd = 0
+    for i in range (0, HOUSES):
+        curtailment_norm = (og_eng_list[i] - curtail_list[i]) / og_eng_list[i]
+        curtailment_norm_list.append(curtailment_norm)
+        sum_x += curtailment_norm
+        sum_x_sqd += curtailment_norm**2
+
+        jains_energy = (sum_x**2) / (HOUSES * sum_x_sqd)
+
+    return(jains_budget, jains_energy, curtailment_norm_list)
+
+# chunks from l
+def divide_chunks(l, n):
+    # looping till length list
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
+#plot results
+def plot(total_eng_list, total_eng_list_mem, Max_Energy, Max_Energy_list):
+    # Plot in different subplots
+    fig1, ax = plt.subplots()  # Create a figure containing a single axes.
+    ax.plot(Max_Energy_list)  # Plot some data on the axes.
+    ax.plot(total_eng_list)
+    ax.plot(total_eng_list_mem)
+
+    plt.title('Total Energy Over Day')
+    plt.xlabel('Time')
+    plt.ylabel('kWh')
+
+    fig1.show()
+    fig1.savefig("Total_energy.png")
+#list1, list2, list3, list4, list5, list6, list7, limit_list, is_bud_list, is_memory
+def JFI_plot(list_of_lists, plot_name, limit_list):
+    # Plot in different subplots
+    fig2, ax = plt.subplots()  # Create a figure containing a single axes.
+    #ax.plot(limit_list, budget1_list, label = "$1 budget")  # Plot some data on the axes.
+    #p subject to change depending on starting budget
+    p = 0
+    index = 0
+    for f in list_of_lists:
+        index = list_of_lists.index(f)
+        name = str(MIN_BUDGET + (budget_increase * index))
+        ax.plot(limit_list, f, label = name)
+        p += 1
+    # ax.plot(limit_list, list7_mem, label = "$19 budget (memory)")
+    #set limits and turn off autoscale
+    #plt.xlim(MIN_ENG_LIM, max(limit_list))
+    #plt.ylim(.85, 1.05)
+    plt.title(plot_name)
+    plt.xlabel('Energy Limit')
+    plt.ylabel('JFI')
+    plt.legend()
+
+    fig2.show()
+    fig2.savefig(plot_name)
+
+    #plot results
+def plot_histogram(house_list, num_curtailed_list):
+    # Plot in different subplots
+    fig3, ax = plt.subplots()  # Create a figure containing a single axes.
+    plt.hist(num_curtailed_list, bins = 10)
+
+    plt.title('Number of Times Curtailed')
+    plt.xlabel('Number of Times Curtailed')
+    plt.ylabel('Number of Houses')
+    plt.show()
+
+    fig3.savefig("Histogram.png")
+
+def compare_JFI(JFI_list_1, JFI_list_2):
+    #not sure if this is the right way to calc percent here but it was easier to use if else statements w/.
+    total_jfi_1 = 0
+    total_jfi_2 = 0
+    for i in range(len(JFI_list_1)):
+        total_jfi_1 += JFI_list_1[i]
+        total_jfi_2 += JFI_list_2[i]
+    if (total_jfi_1 < total_jfi_2):
+        smaller_JFI = JFI_list_1
+        percent_jfi = (1 - (total_jfi_1 / total_jfi_2)) * 100
+        return percent_jfi, smaller_JFI
+    if (total_jfi_1 > total_jfi_2):
+        smaller_JFI = JFI_list_2
+        percent_jfi = (1 - (total_jfi_2 / total_jfi_1)) * 100
+        return percent_jfi, smaller_JFI
+    else:
+        percent_jfi = 0
+        smaller_JFI = 0
+        return percent_jfi, smaller_JFI
+
+#call main function
+main()
+#
+# def write_to_files(listof_JFIbud_lists, file_name, limit_list):
+#     #open files to write to, make chart
+#     JFI_eng = open(r"C:\Users\Troy\Desktop\REU Project/file_name.txt", "w")
+#     JFI_eng.write(file_name, "\n")
+#     JFI_eng.write("_____________________________________\n")
+#     JFI_eng.write("\t\t\t\t\t\tMax Energy\n\n")
+#     for i in limit_list:
+#         JFI_eng.write("i \t\t\t")
+#         JFI_eng.write("n\n")
+#
+#     #
+#     # JFI_bud = open(r"C:\Users\Troy\Desktop\REU Project/JFI_bud.txt", "w")
+#     # JFI_bud.write("Average JFI of Budget Curtailed w/out Memory\n")
+#     # JFI_bud.write("_____________________________________\n\n")
+#     # JFI_bud.write("\t\t\t\t\t\tMax Energy\n\n")
+#     # JFI_bud.write("\t\t\t2000\t\t\t2500\t\t\t3000\t\t\t3500\t\t\t4000\t\t\t4500\t\t\t5000\n")
+#     # JFI_bud.write("\nStarting Budget  ")
+#     #
+#     #
+#     # JFI_eng.write("\n\n\t\t  " + str(budget))
+#     # JFI_bud.write("\n\n\t\t  " + str(budget))
+#     #
+#     #
+#     # JFI_eng.write("\t" + str(jains_eng))
+#     # JFI_bud.write("\t" + str(jains_bud))
+#     #
+#     #
+#     JFI_eng.close()
+#     #JFI_bud.close()
