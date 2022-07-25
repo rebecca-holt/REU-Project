@@ -1,0 +1,31 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Jul 18 10:46:12 2022
+
+@author: rebec
+"""
+#find the average amount of energy produced by one solar panel in a single day
+#using years worth of data
+import math 
+# open the sample file used
+file = open("AllSolarData.csv")
+day_eng_list = []
+# read the content of the file opened
+content = file.readlines()
+
+for i in range (0, 524160, 1440): 
+    day_eng = 0
+    #print("day_eng: ", day_eng)
+    for p in range(i, i+1439):
+        if math.isnan(float(content[p])) == False: 
+            day_eng += float(content[p])
+        else:
+            pass
+
+    day_eng_list.append((day_eng/ 60) / 1000)
+   
+print(day_eng_list)
+print("sum(day_eng_list):", sum(day_eng_list))
+print("len(day_eng_list): ", len(day_eng_list))
+avg_day_eng = sum(day_eng_list) / len(day_eng_list)
+print("avg_day_eng: ", avg_day_eng)
