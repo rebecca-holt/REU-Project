@@ -1,0 +1,132 @@
+#import libraries
+import matplotlib.pyplot as plt
+
+# define constants
+HOUSES = 2
+Max_Energy = 20
+#frac_tot_list = 1
+default_perc = .4
+a =  3
+
+# main function to call MD_curtailment
+
+def main():
+    # each list has 60 integers to represent minutes in an hour for two hosues. Data is made up.
+    OGeng_sum_list = []
+    eng_sum_list = []
+    house1_energy = [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 9, 10, 9, 10, 10, 11, 9, 8, 7, 10, 11, 9, 8, 6, 11, 5,
+                     6, 7, 8, 6, 9, 10, 11, 11, 12, 11, 12, 14, 16, 15, 16, 14, 15, 17, 16, 17, 19, 19, 18, 20, 19, 21, 22, 22, 22, 23]
+    house2_energy = [0, 0, 0, 0, 1, 10, 3, 2, 5, 7, 8, 7, 8, 11, 19, 10, 8, 11, 10, 12, 9, 9, 19, 10, 12, 14, 8, 5, 9, 15,
+                     7, 18, 9, 6, 9, 10, 11, 12, 11, 11, 13, 14, 16, 15, 20, 14, 16, 15, 25, 24, 28, 19, 18, 20, 19, 28, 28, 29, 20, 21]
+    
+    #get sum energy of each house and add to list
+    OGhouse1_energySUM = sum(house1_energy)
+    OGhouse2_energySUM = sum(house2_energy)
+    OGeng_sum_list.append(OGhouse1_energySUM)
+    OGeng_sum_list.append(OGhouse2_energySUM)
+    #get total energy of all hosues
+    OGtotal_eng_sum = sum(OGeng_sum_list)
+    #get capacity of each house
+    house1_capacity = OGhouse1_energySUM / OGtotal_eng_sum
+    house2_capacity = OGhouse2_energySUM / OGtotal_eng_sum
+    print("house1_capacity: ", house1_capacity)
+    print("house2_capacity: ", house2_capacity)
+    B1 = get_B(house1_capacity)
+    B2 = get_B(house2_capacity)
+    print("B1: ", B1)
+    print("B2: ", B2)
+    # add energy of two houses
+    total_energy = [house1_energy[i] + house2_energy[i]
+                    for i in range(len(house2_energy))]
+    
+    #plot energy before curtailment
+    plot_day_energy(total_energy, "No Curtailment")
+    #AIMD curtailment 
+    total_energy, house1_energy, house2_energy = MD_curtailment(house1_energy, house2_energy, total_energy, B1, B2)
+    #plot energy after curtailment
+    house1_energySUM = sum(house1_energy)
+    house2_energySUM = sum(house2_energy)
+    eng_sum_list.append(house1_energySUM)
+    eng_sum_list.append(house2_energySUM)
+    
+    plot_day_energy(total_energy, "after AIMD")
+    
+    #get JFI
+    JFI = calc_jains(OGeng_sum_list, eng_sum_list)
+    print("JFI: ", JFI)
+    
+def MD_curtailment(house1_energy, house2_energy, total_energy, B1, B2):
+    
+    for i in range(len(total_energy)):
+        MD = False
+        #get total_energy list (may have changed from AI)
+        total_energy = [house1_energy[i] + house2_energy[i]
+                        for i in range(len(house2_energy))]
+        while (total_energy[i] > Max_Energy):
+           MD = True
+           #Use MD on houses
+         
+           house1_energy[i] = house1_energy[i] * B1
+           house2_energy[i] = house1_energy[i] * B2
+           #calculate new total energy list 
+           total_energy = [house1_energy[i] + house2_energy[i]
+                           for i in range(len(house2_energy))]
+       
+        #if the last min had multiplicative decrease and the current min exceeds the limit
+        if (MD == True and (house1_energy[i-1] + a) < house1_energy[i]):
+            house1_energy[i] = house1_energy[i-1] + a
+        #otherwise leave energy unchanged because AI is impossible
+        else: 
+            #at this point MD could be turned off probably, bud doesn't have to be
+            pass
+        #house2
+        if (MD == True and (house2_energy[i-1] + a) < house2_energy[i]):
+            house2_energy[i] = house2_energy[i-1] + a
+        else: 
+            pass
+              
+    return total_energy, house1_energy, house2_energy
+
+def get_B(capacity):
+     if (capacity <= 0.7): 
+         B = (1-capacity) + 0.45
+     else: 
+         B = 0.9
+         
+     return B
+ 
+def plot_day_energy(total_energy, name):
+    mins = len(total_energy)
+    plot1 = plt.figure(1, dpi=1200)
+    x_mins = list(range(0, mins))
+    y = total_energy
+    eng_lim_list = []
+    for j in range(mins):
+        eng_lim_list.append(Max_Energy)
+    #plot house2 energy
+    plt.plot(x_mins, y, linewidth=1,
+             label="Total Energy: " + name)
+    plt.plot(x_mins, eng_lim_list, linewidth=1, linestyle="--")
+    plt.title("Power Over Day")
+    # plt.legend([name])
+    plt.legend(loc=2, prop={'size': 6})
+    plt.xlabel('Mins')
+    plt.ylabel('Power (kW)')
+
+
+def calc_jains(OGeng_sum_list, eng_sum_list):
+   # calculate JFI of budget in different way
+    curtailment_norm_list = []
+    sum_x = 0
+    sum_x_sqd = 0
+
+    for i in range(0, HOUSES):
+        curtailment_norm = (OGeng_sum_list[i] - eng_sum_list[i]) / OGeng_sum_list[i]
+        curtailment_norm_list.append(curtailment_norm)
+        sum_x += curtailment_norm
+        sum_x_sqd += curtailment_norm**2
+
+    JFI = (sum_x**2) / (HOUSES * sum_x_sqd)
+    return(JFI)
+
+main()
