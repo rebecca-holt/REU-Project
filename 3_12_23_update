@@ -1,0 +1,1847 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Feb  6 18:05:59 2023
+
+@author: rebec
+"""
+
+#import libraries
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import numpy as np
+import cvxpy as cp
+import pandas as pd
+
+import gurobipy as gp
+from gurobipy import GRB
+
+
+import random
+import csv
+import itertools
+import operator
+from operator import itemgetter
+from datetime import datetime
+import math
+from statistics import mean
+from matplotlib import pyplot
+
+start = datetime.now()
+
+
+# define global variables
+
+# cost of 1kwh
+kWh_cost = .1
+
+#power rating of solar panel 
+PWR_RATING = .33
+
+# TIME_STEPS to consider
+TIME_STEPS = 1439
+startTime = 0
+endTime = 1439
+
+start_day = 1
+end_day = 1
+
+# min and max budget for each house
+MIN_FRACTION = 1
+MAX_FRACTION = 1
+STEP_FRACTION = 1
+
+# energy limit,
+Max_Energy = 300
+percent = .10
+
+# when the house reaches this percent of it's initial energy, curtailment will stop
+asmpt_limit = 0.2
+
+num_iterations = 1
+
+# num of hosues
+min_HOUSES = 1000
+max_HOUSES = 1001
+house_step = 1
+num_houses_list = []
+
+for i in range(min_HOUSES, max_HOUSES, house_step):
+    num_houses_list.append(i)
+
+# standard deviation in number of solar panels
+SD = 5
+#mean number of solar panels
+mean_num_SP = 13
+
+DEMAND_DATA = np.asarray([0.547900219,0.552774123,0.380816886,0.358854167,0.510570175,0.83598136,1.426650219,1.646260965,1.737993421,
+2.008130482,1.978273026,1.920005482,1.852236842,1.793958333,1.76410636,1.780027412,1.832291667,1.90189693,
+1.936781798,1.913240132,1.810745614,1.63247807,1.373656798,1.053278509])
+min_increments = np.linspace(0, 1, 1440)
+hr_increments = np.linspace(0, 1, 24)
+interpolated_demand = np.interp(min_increments, hr_increments, DEMAND_DATA)
+percentCurtailedList =[]
+perc_curt_list = []
+
+def main():
+    total_excess = 0
+    sum_total_day_demand = 0
+    total_grid_energy = 0
+    conserv_day_grid_eng = 0
+    og_total_energy = 0
+    tot_JFI_eng = 0
+    tot_JFI_bud = 0
+    
+    for r in range(start_day, end_day + 1):
+        day = r 
+        start_min = ((day - 1) * 1440) + 1
+        end_min = start_min + 1440
+        list_num_SP, HC_list, representative_panel_list, avg_day_list, representative_day, total_SP_list, listOflist_num_SP, avg_panel_list, minute_demand_lists,total_day_demand, house_day_demand = day_solar_data(start_min, end_min)
+        
+        # get estimate budget to use and monthly budget
+        day_bud_list, og_day_bud_list, month_bud_list, listOf_og_total_eng_lists, excess_eng_cost_list, og_day_total_energy_list = estimate_budget(avg_day_list, list_num_SP, total_SP_list,listOflist_num_SP, representative_panel_list, minute_demand_lists,total_day_demand)
+        
+    #     #NO CURTAILMENT: call curatilment choices to see the total energy created and number of houses that can exist without
+    #     #exceeding the max energy limit ever
+    
+        noCurtNumHouses = 4
+        make_energy_graph, favor_budget, rltv_perc, curtail, optimized, broadcast, AIMD = False, False, False, False, False, False, False
+        hsDayEngListNOcurt=[]
+        new_total_eng_list, num_limits, limit_list, num_removed_list, new_total_energy_list, num_limits, list_OfFractions, new_sum_energy_list, noCurtNumHouses, conserv_day_tot_eng, hsDayEngListNOcurt = curtailment_choices(
+            "No Curtailment", 2, favor_budget, rltv_perc, curtail, optimized, make_energy_graph, broadcast, AIMD, day_bud_list, og_day_bud_list, excess_eng_cost_list, listOf_og_total_eng_lists,avg_day_list,representative_day, listOflist_num_SP, representative_panel_list, total_SP_list, noCurtNumHouses, minute_demand_lists,total_day_demand, hsDayEngListNOcurt, house_day_demand)
+        noCurtHC = noCurtNumHouses * mean_num_SP * PWR_RATING
+       
+        percIncHC_list = []
+        for i in range (len(HC_list)): 
+            try: 
+                percIncHC = ((HC_list[i] - noCurtHC) / noCurtHC) * 100
+            except: 
+                percIncHC = 100
+            percIncHC_list.append(percIncHC)
+            
+        # divide no curtailment energy list into more lists to write to document more easily.
+        listof_newtoteng_lists = list(divide_chunks(new_total_eng_list, TIME_STEPS))
+    
+        compare_JFIs_bud = []
+        compare_JFIs_eng = []
+        compare_xtra_eng_difference = []
+        compare_strd_dvtn_xtra_eng = []
+     
+        # print("AIMD:\n")
+        # compare = False
+        # make_energy_graph, favor_budget, rltv_perc, curtail, optimized, broadcast, AIMD = False, False, False, False, False, False, True
+        # JFI_bud_list, JFI_eng_list, compare_xtra_eng_difference, sum_excess_list, day_total_energy, og_day_total_energy_list, minute_demand_lists,total_day_demand = iterate("AIMD Curtailment", 1,"--",  "w", make_energy_graph, favor_budget, rltv_perc, curtail, optimized, num_limits, list_OfFractions,
+        #             num_removed_list, compare_JFIs_bud, compare_JFIs_eng,
+        #             compare_xtra_eng_difference, listof_newtoteng_lists, "JFI of Budget(1, 2)", "JFI of Energy(1, 2)", broadcast, AIMD, listOf_og_total_eng_lists, percIncHC_list, og_day_total_energy_list, avg_day_list, list_num_SP, total_SP_list,listOflist_num_SP, representative_day, representative_panel_list, noCurtNumHouses,minute_demand_lists,total_day_demand, hsDayEngListNOcurt, house_day_demand)
+        
+        print("Direct Control:\n")
+        compare = False
+        make_energy_graph, favor_budget, rltv_perc, curtail, optimized, broadcast, AIMD = False, False, False, False, False, True, False
+        JFI_bud_list, JFI_eng_list, compare_xtra_eng_difference,sum_excess_list, day_total_energy, og_day_total_energy_list, minute_demand_lists,total_day_demand = iterate("Direct Control Curtailment", 2, "-", "w", make_energy_graph, favor_budget, rltv_perc, curtail, optimized, num_limits, list_OfFractions,
+                    num_removed_list, compare_JFIs_bud, compare_JFIs_eng,
+                    compare_xtra_eng_difference, listof_newtoteng_lists, "JFI of Budget(1, 2)", "JFI of Energy(1, 2)", broadcast, AIMD, listOf_og_total_eng_lists, percIncHC_list, og_day_total_energy_list, avg_day_list, list_num_SP, total_SP_list,listOflist_num_SP, representative_day, representative_panel_list, noCurtNumHouses,minute_demand_lists,total_day_demand,hsDayEngListNOcurt, house_day_demand)
+        
+        # print("Bottom-Up:\n")
+        # compare = False
+        # make_energy_graph, favor_budget, rltv_perc, curtail, optimized, broadcast, AIMD = False, True, False, True, True, False, False
+        # JFI_bud_list, JFI_eng_list,  compare_xtra_eng_difference,sum_excess_list, day_total_energy, og_day_total_energy_list, minute_demand_lists,total_day_demand = iterate("Bottom Up Curtailment", 2,"-", "w", make_energy_graph, favor_budget, rltv_perc, curtail, optimized, num_limits, list_OfFractions,
+        #             num_removed_list, compare_JFIs_bud, compare_JFIs_eng,
+        #             compare_xtra_eng_difference, listof_newtoteng_lists, "JFI of Budget(1, 2)", "JFI of Energy(1, 2)", broadcast, AIMD, listOf_og_total_eng_lists, percIncHC_list, og_day_total_energy_list, avg_day_list, list_num_SP, total_SP_list,listOflist_num_SP, representative_day, representative_panel_list, noCurtNumHouses, minute_demand_lists,total_day_demand,hsDayEngListNOcurt, house_day_demand)
+    
+        total_excess += (sum_excess_list[-1])
+        total_grid_energy += day_total_energy
+        
+        conserv_day_grid_eng += conserv_day_tot_eng
+        og_total_energy += og_day_total_energy_list[-1]
+        sum_total_day_demand += (sum(total_day_demand)/60)
+         
+   
+        
+        percentCurtailed = (total_excess / og_total_energy) * 100
+        perc_curt_list.append(percentCurtailed)
+        
+        
+      
+    
+    
+        tot_JFI_eng += JFI_eng_list[-1]
+        tot_JFI_bud += JFI_bud_list[-1]
+        # print("tot_JFI_eng: ",tot_JFI_eng)
+        # print("tot_JFI_bud: ",tot_JFI_bud)
+        print("Day: ", r)
+    # #1/25/22 10:45am commeneted out
+    #     # make_energy_graph, favor_budget, rltv_perc, curtail = False, False, False, True
+    #     # compare_JFIs_bud, compare_JFIs_eng, compare_xtra_eng_difference, minute_demand_lists,total_day_demand = iterate("a", make_energy_graph,\
+    #     # curtail_percentage, favor_budget, rltv_perc, curtail, num_limits, list_OfFractions, num_removed_list, avg_total_budget, budget, \
+    #     # og_budget, month_bud, total_excess_eng, compare_JFIs_bud, compare_JFIs_eng, compare_xtra_eng_difference, listof_newtoteng_lists, "JFI of Budget(2, 2)", "JFI of Energy(2, 2)")
+    #     #
+    #     # make_energy_graph, favor_budget, rltv_perc, curtail = False, False, True, True
+    #     # compare_JFIs_bud, compare_JFIs_eng, compare_xtra_eng_difference, minute_demand_lists,total_day_demand = iterate("a", make_energy_graph,\
+    #     # curtail_percentage, favor_budget, rltv_perc, curtail, num_limits, list_OfFractions, num_removed_list, avg_total_budget, budget, \
+    #     # og_budget, month_bud, total_excess_eng, compare_JFIs_bud, compare_JFIs_eng, compare_xtra_eng_difference, listof_newtoteng_lists, "JFI of Budget(3, 2)", "JFI of Energy(3, 2)")
+    
+    #     #get mean difference between JFI, energy, and extra energy of Curtailment schemes 1 and 2
+    #     mean_differenceJFIs_eng, strd_dvtnJFIs_eng = curtailment_stats(compare_JFIs_eng, "JFI energy")
+    #     mean_differenceJFIs_bud, strd_dvtnJFIs_bud = curtailment_stats(compare_JFIs_bud, "JFI budget")
+    #     mean_difference_xtra_eng, strd_dvtn_xtra_eng = curtailment_stats(compare_xtra_eng_difference, "Extra energy")
+    # #all of these lists are empty
+       
+    try:
+        avg_excess = total_excess / (end_day+1 - start_day)
+        avg_grid_energy = total_grid_energy  / (end_day+1 - start_day)
+        avg_conserv_day_grid_eng = conserv_day_grid_eng  / (end_day+1 - start_day)
+        JFI_eng = tot_JFI_eng / ((end_day + 1) - start_day)
+        JFI_bud = tot_JFI_bud / ((end_day + 1) - start_day)
+    except:
+        avg_excess = total_excess
+        avg_grid_energy = total_grid_energy
+        avg_conserv_day_grid_eng = conserv_day_grid_eng
+        # JFI_eng = tot_JFI_eng 
+        # JFI_bud = tot_JFI_bud
+    
+    #percent_demand = (total_demand/og_total_energy)*100
+    percent_demand = ((sum_total_day_demand)/og_total_energy)*100
+    AVGpercentCurtailed=sum(perc_curt_list)/len(perc_curt_list)
+   
+    
+    
+  
+    print("percent_demand", percent_demand)
+    print(datetime.now() - start)
+    
+    # print("avg_excess: ", avg_excess)
+    # print("avg_grid_energy: ", avg_grid_energy)
+    # print("avg_conserv_day_grid_eng: ",avg_conserv_day_grid_eng)
+    #print("percent_demand", percent_demand)
+    print("total_grid_energy: ", total_grid_energy)
+    print("total_excess: ", total_excess)
+    print("conserv_day_grid_eng: ",conserv_day_grid_eng)
+    print("og_total_energy: ", og_total_energy)
+    print("month_bud_list: ", month_bud_list)
+    print("JFI_eng: ",JFI_eng)
+    print("JFI_bud: ",JFI_bud)
+    
+    print("perc_curt_list: ", perc_curt_list)
+    print("AVGpercentCurtailed", AVGpercentCurtailed)
+
+def day_solar_data(start_min, end_min):
+    avg_day_list = []
+    rep_day_list = []
+    total_SP_list = []
+    listOflist_num_SP = []
+    representative_panel_list = []
+    avg_panel_list = []
+    total_day_demand = [0]*1439
+    file = open("AllSolarData2.csv")
+    content = file.readlines()
+    
+    # content = pd.read_csv("AllSolarData.csv")
+    # content = content.replace('',np.nan)
+    # content = content.dropna(axis="columns", how="any")
+    array_num_SP = (np.random.normal(mean_num_SP, SD, max_HOUSES)) // 1
+    # make array into list to handle it more easily
+    list_num_SP = array_num_SP.tolist()
+  
+    # # Creating histogram of number of solar panels 
+    # num_bins = 10
+    # fig, axs = plt.subplots(1, 1,
+    #                         figsize =(10, 7),
+    #                         tight_layout = True)
+     
+    # axs.hist(list_num_SP, bins = num_bins)
+    # plt.title("Histogram of Number of Solar Panels")
+    # plt.xlabel('Number of Solar Panels')
+    # plt.ylabel('Number of Houses')
+    # #plots average line on histogram
+    # plt.axvline(mean(list_num_SP), color='k', linestyle='dashed', linewidth=1)
+    # # Show plot
+    # plt.show()
+    
+    listOflist_num_SP.append(list_num_SP)
+    # count the total number of solar panels
+    
+    #make list of power demand for each house for whole day & tally SP
+    minute_demand_lists =[]
+    total_SP = 0
+    
+    for r in range(min_HOUSES):
+        total_SP += list_num_SP[r]
+        #make list of the power demand of house for each minute, then add to list house's lists
+        minute_demand_list= [0] * (TIME_STEPS+1)
+
+        for t in range(TIME_STEPS):
+            minute_demand = interpolated_demand[t] + random.uniform(-.2, .2)
+            minute_demand_list[t]=(minute_demand);
+            #not dividing by 60 because this is a power value, not energy
+            total_day_demand[t] += (minute_demand)
+        minute_demand_lists.append(minute_demand_list)
+    total_SP_list.append(total_SP)
+    
+    #plot_demand(minute_demand_list)
+
+    #print("length total_SP_list: ", len(total_SP_list))
+    #print("minute_demand_lists:", len(minute_demand_lists))
+    # commenting this out bc instead of making one demand list for all houses, making list for each
+    # house and then summing each time step
+    
+    # minute_demand_lists=[]
+    # startDemand = random.uniform(0, 15)
+    # endDemand = random.uniform(startDemand, 20)
+    # for t in range(TIME_STEPS):
+    #     minute_demand = random.uniform(startDemand, endDemand)
+    #     minute_demand_lists.append(minute_demand);
+    for HOUSES in range (min_HOUSES):
+        #open average day data
+        with open('Day162_Sunny.csv') as avg_file:
+            avg_content = avg_file.readlines()
+        avg_rows = avg_content[1:]
+        #get rid of '\n'
+        avg_panel_str = [x[:-1] for x in avg_rows]
+        #convert list of str to list of floats
+        avg_panel_float = [float(x) for x in avg_panel_str]
+        #get desired hour of data
+        avg_panel_W = avg_panel_float[startTime: endTime]
+        rows = content[start_min:end_min]
+        #get rid of '\n'
+        rep_panel_str = [x[:-1] for x in rows]
+        #convert list of str to list of floats
+        rep_panel_W = [float(x) for x in rep_panel_str]
+        #divide everything by 1000 to get kW
+        representative_panel = [number / 1000 for number in rep_panel_W]
+        avg_panel = [number / 1000 for number in avg_panel_W]
+        
+        #add to lists
+        representative_panel_list.append(representative_panel)
+        avg_panel_list.append(avg_panel)
+        
+        
+        #rep day and avg_day are extinct, but keeping here out of laziness
+        avg_day = [element * total_SP for element in avg_panel_list[0]]
+        representative_day = [element * total_SP for element in representative_panel]
+        avg_day_list.append(avg_day)
+        rep_day_list.append(representative_day)
+    
+    house_day_demand = []
+    for house_min_demand in minute_demand_lists:
+        hs_tot_demand = sum(house_min_demand)/60
+        house_day_demand.append(hs_tot_demand)
+    n_bins = 20
+     
+
+
+    # # Creating histogram
+    # fig, axs = plt.subplots(1, 1,
+    #                         figsize =(10, 7),
+    #                         tight_layout = True)
+     
+    # axs.hist(house_day_demand, bins = n_bins)
+    # plt.title("Histogram of Total Day Energy Demand")
+    # plt.xlabel('Total Day Energy Demand (kWh)')
+    # plt.ylabel('Number of Houses')
+    # #plots average line on histogram
+    # plt.axvline(mean(house_day_demand), color='k', linestyle='dashed', linewidth=1)
+    # # Show plot
+    # plt.show()
+    
+    HC_list = []
+    for i in range (len(num_houses_list)):
+        HC_list.append(total_SP_list[0] * PWR_RATING)
+    return list_num_SP, HC_list, representative_panel_list, avg_day_list, \
+        rep_day_list, total_SP_list, listOflist_num_SP, avg_panel_list, minute_demand_lists, total_day_demand, house_day_demand
+# define main function to call other functions
+    
+def plot_demand(minute_demand_list):
+    mins= np.linspace(0, 1440, num=len(minute_demand_list))/60
+    hours = np.linspace(0, 24, num=len(DEMAND_DATA))
+    upper_band = DEMAND_DATA + .2
+    lower_band = DEMAND_DATA - .2
+    
+    plt.figure()
+    plt.plot(mins,minute_demand_list,label= "minute demand single house" )
+    plt.plot(hours,DEMAND_DATA,label= "demand data" )
+    plt.plot(hours,upper_band,label= "upper band" )
+    plt.plot(hours,lower_band,label= "lower band" )
+    
+    plt.legend(loc=1, prop={'size': 6})
+    plt.xlabel('Time (hr)')
+    plt.ylabel('Power (kW)')
+    plt.title("House Demand")
+    plt.savefig('ex1.pdf')
+    plt.clf()
+
+
+def iterate(plot_day_name, plot_line_width, line_style, file_choice, make_energy_graph, favor_budget, rltv_perc, curtail, optimized, num_limits, list_OfFractions,
+            num_removed_list, compare_JFIs_bud, compare_JFIs_eng,
+            compare_xtra_eng_difference, listof_newtoteng_lists, graph1_name, graph2_name, broadcast, AIMD, listOf_og_total_eng_lists,percIncHC_list, 
+            og_day_total_energy_list, avg_day_list, list_num_SP, total_SP_list, listOflist_num_SP, representative_day, representative_panel_list, noCurtNumHouses, minute_demand_lists,total_day_demand, hsDayEngListNOcurt, house_day_demand):
+    month_bud_list = []
+    sum_excess_list = []
+    # get the length of the array
+    len_of_array = len(list_OfFractions) * num_limits
+    # make empty total arrays for each list
+    tot_JFI_bud_array = np.zeros(len_of_array)
+    tot_JFI_eng_array = np.zeros(len_of_array)
+    tot_percent_curtailed_array = np.zeros(len_of_array)
+    tot_perc_bud_used_array = np.zeros(len_of_array)
+    tot_energy_difference_array = np.zeros(len_of_array)
+    tot_num_removed_array = np.zeros(len_of_array)
+    tot_sum_energy_array = np.zeros(len_of_array)
+    tot_sum_excess_array = np.zeros(len_of_array)
+    tot_month_bud_array = np.zeros(len_of_array)
+   
+    percentCurtailedList = []
+    perc_inc_eng_list = []
+    # iterate through same curtailment scheme a given number of times
+    for i in range(num_iterations):
+        # get estimate budget to use and monthly budget
+        day_bud_list, og_day_bud_list, month_bud_list, og_total_energy_list, excess_eng_cost_list, day_total_energy_list = estimate_budget(avg_day_list, list_num_SP, total_SP_list,listOflist_num_SP, representative_panel_list, minute_demand_lists,total_day_demand)
+        month_bud_list.append(month_bud_list)
+        
+        listof_og_toteng_lists = list(
+            divide_chunks(listOf_og_total_eng_lists, TIME_STEPS))
+        
+        # send to curtailment choices to curtail throughout day
+        listOf_total_eng_lists, JFI_bud_list, JFI_eng_list, n, limit_list, list_OfFractions, percent_curtailed_list, perc_bud_used_list, new_sum_energy_list, day_total_energy =\
+            curtailment_choices(plot_day_name, plot_line_width, favor_budget, rltv_perc, curtail, optimized, make_energy_graph, broadcast, AIMD, day_bud_list, og_day_bud_list, excess_eng_cost_list, listof_og_toteng_lists,
+                                avg_day_list,representative_day, listOflist_num_SP, representative_panel_list, total_SP_list, noCurtNumHouses, minute_demand_lists,total_day_demand, hsDayEngListNOcurt, house_day_demand)
+
+        listof_toteng_lists = list(
+            divide_chunks(listOf_total_eng_lists, TIME_STEPS))
+        
+      
+        # get difference in energy
+        energy_difference_list = differenceIn_energy(
+            listof_newtoteng_lists, listof_toteng_lists)
+       # print("energy_difference_list", energy_difference_list)
+        # calculate excess energy and cost of excess energy for each hour
+        sum_energy = 0
+       
+        for i in range(len(num_houses_list)):
+            og_total_energy_list = listof_og_toteng_lists[i]
+           
+            total_energy_list = listof_toteng_lists[i]
+         
+            for a in range(TIME_STEPS):
+                # calc by how much energy exceeds max limit
+                excess_eng = og_total_energy_list[a] - total_energy_list[a]
+                if excess_eng > 0:
+                    sum_energy += excess_eng / 60
+            sum_excess_list.append(sum_energy)
+        #print("sum_excess_list: ", sum_excess_list)
+    
+        
+        for i in range(len(sum_excess_list)):
+            percentCurtailed = (sum_excess_list[i] / og_day_total_energy_list[i]) * 100
+           
+            percentCurtailedList.append(percentCurtailed)
+        AVGpercentCurtailedList = sum(percentCurtailedList)/len(percentCurtailedList)
+        #print("percentCurtailedList: ", percentCurtailedList)
+        
+        # make lists into arrays
+        JFI_bud_array = np.asarray(JFI_bud_list)
+        JFI_eng_array = np.asarray(JFI_eng_list)
+        percent_curtailed_array = np.asarray(percent_curtailed_list)
+        perc_bud_used_array = np.asarray(perc_bud_used_list)
+        energy_difference_array = np.asarray(energy_difference_list)
+        num_rem_array = np.asarray(num_removed_list)
+        new_sum_energy_array = np.asarray(new_sum_energy_list)
+        sum_excess_array = np.asarray(sum_excess_list)
+        month_bud_array = np.asarray(month_bud_list)
+        
+        # add arrays to total arrays
+        get_tot_array(tot_JFI_bud_array, JFI_bud_array, len_of_array)
+        get_tot_array(tot_JFI_eng_array, JFI_eng_array, len_of_array)
+        # get_tot_array(tot_percent_curtailed_array,
+        #               percent_curtailed_array, len_of_array)
+        get_tot_array(tot_perc_bud_used_array,
+                      perc_bud_used_array, len_of_array)
+        get_tot_array(tot_energy_difference_array,
+                      energy_difference_array, len_of_array)
+        get_tot_array(tot_num_removed_array, num_rem_array, len_of_array)
+       
+        get_tot_array(tot_sum_energy_array, new_sum_energy_array, len_of_array)
+        get_tot_array(tot_sum_excess_array, sum_excess_array, len_of_array)
+        get_tot_array(tot_month_bud_array, month_bud_array, len_of_array)
+        
+    # divide arrays to get averages
+    avg_JFI_bud_array = tot_JFI_bud_array / num_iterations
+    avg_JFI_eng_array = tot_JFI_eng_array / num_iterations
+    avg_percent_curtailed_array = tot_percent_curtailed_array / num_iterations
+    avg_perc_bud_used_array = tot_perc_bud_used_array / num_iterations
+    avg_energy_difference_array = tot_energy_difference_array / num_iterations
+    avg_num_rem_array = tot_num_removed_array / num_iterations
+    avg_sum_energy_array = tot_sum_energy_array / num_iterations
+    avg_sum_excess_array = tot_sum_excess_array / num_iterations
+    avg_month_bud_array = tot_month_bud_array / num_iterations
+    # print("avg_sum_excess_array", avg_sum_excess_array)
+    # print("Energy sent to grid: ", avg_sum_energy_array)
+    # print("JFI_bud_list: ", avg_JFI_bud_array)
+    # print("JFI_eng_list: ", avg_JFI_eng_array)
+    # convert arrays to lists
+    avg_JFI_bud_list = avg_JFI_bud_array.tolist()
+    avg_JFI_eng_list = avg_JFI_eng_array.tolist()
+    avg_percent_curtailed_list = avg_percent_curtailed_array.tolist()
+    avg_perc_bud_used_list = avg_perc_bud_used_array.tolist()
+    avg_energy_difference_list = avg_energy_difference_array.tolist()
+    avg_num_rem_list = avg_num_rem_array.tolist()
+    avg_month_bud_list = avg_month_bud_array.tolist()
+    avg_sum_energy_list = avg_sum_energy_array.tolist()
+    
+    
+    perc_curt_list = []
+    for i in range(len(avg_sum_energy_array)):
+        perc_inc_eng = (energy_difference_list[i] / avg_sum_energy_array[i]) * 100
+        perc_curt = (avg_sum_excess_array[i] / avg_sum_energy_array[i]) * 100
+        perc_inc_eng_list.append(perc_inc_eng)
+    print("perc_inc_list", perc_inc_eng_list)
+    #plot_budVkW(avg_month_bud_list, energy_difference_list, plot_day_name)
+  
+    #plot_HC(plot_day_name, percentCurtailedList, avg_month_bud_list, percIncHC_list, line_style)
+    # add arrays to lists to compare later
+    # compare_JFIs_bud.append(avg_JFI_bud_list)
+    # compare_JFIs_eng.append(avg_JFI_eng_list)
+    # compare_xtra_eng_difference.append(avg_energy_difference_list)
+    
+    # # divide lists into chunks
+    listof_JFIbud_lists = list(divide_chunks(avg_JFI_bud_list, n))
+    listof_JFIeng_lists = list(divide_chunks(avg_JFI_eng_list, n))
+    listof_perc_curtailed_lists = list(
+         divide_chunks(avg_percent_curtailed_list, n))
+    listof_perc_bud_used_lists = list(divide_chunks(avg_perc_bud_used_list, n))
+    eng_diff_listOf_lists = list(divide_chunks(
+        avg_energy_difference_list, num_limits))
+    num_rem_listOf_lists = list(divide_chunks(avg_num_rem_list, n))
+   
+    # #get file name based on boolean values
+    # curtail_string, fav_bud_string = get_file_name(rltv_perc, favor_budget)
+
+    # #write JFIs, difference in energy, number of extra houses to file (first opening file here)
+    # write_to_files(curtail_string, fav_bud_string, limit_list, list_OfFractions, listof_JFIbud_lists, listof_JFIeng_lists, num_rem_listOf_lists,\
+    # eng_diff_listOf_lists, file_choice, budget, month_bud, listof_perc_curtailed_lists, listof_perc_bud_used_lists)
+# commented out 1/25/22 10:50 am
+    # JFI_plot(listof_JFIbud_lists, graph1_name, limit_list, favor_budget, rltv_perc)
+    # JFI_plot(listof_JFIeng_lists, graph2_name, limit_list, favor_budget, rltv_perc)
+    return JFI_bud_list, JFI_eng_list, compare_xtra_eng_difference, sum_excess_list, day_total_energy, og_day_total_energy_list, minute_demand_lists,total_day_demand
+
+def get_tot_array(tot_array, array, len_of_array):
+    for i in range(len_of_array):
+        tot_array[i] += array[i]
+    return tot_array
+
+# function to estimate the budget
+
+
+def estimate_budget(avg_day_list, list_num_SP, total_SP_list, listOflist_num_SP, representative_panel_list, minute_demand_lists,total_day_demand):
+    # init list of cost of excess energy for each hour
+    excess_eng_cost_list = []
+    # init list of excess energy every hour
+    excess_eng_list = []
+    listOf_og_total_eng_lists = []
+    day_total_energy_list = []
+    
+    # start with 1 arbitrarily so you can look at energy lists bc make_object needs some value
+    day_bud_list = []
+    og_day_bud_list = []
+    for i in range(len(num_houses_list)):
+        day_bud_list.append(0)
+        og_day_bud_list.append(0)
+        excess_eng_cost_list.append(0)
+    #for k in range(MIN_ENG_LIM, MAX_ENG_LIM, ENG_CHANGE):
+    for k in range(len(num_houses_list)):
+        HOUSES = num_houses_list[k]
+        numHousesIndex = k
+        budget = 0
+        og_budget = 0
+        fraction = 0
+
+        # initialize constants and lists for each trial
+        num_curtailed, house_list, energy_list, budget_list, og_budget_list, og_eng_list, \
+            num_curtailed_list, curtailed_eng_list, total_energy_list, size_factor_list, num_removed,\
+                new_house_list, frac_tot_list = init_main_lists(HOUSES, numHousesIndex, listOflist_num_SP, total_SP_list)
+
+        # make house object just to get energy lists
+        make_object(House, og_eng_list, energy_list, num_curtailed, budget, og_budget, house_list, size_factor_list,
+                        frac_tot_list, fraction, HOUSES, numHousesIndex, excess_eng_cost_list, listOflist_num_SP, representative_panel_list, minute_demand_lists,total_day_demand)
+        
+        # get total energy list
+        og_total_energy_list, day_total_energy = get_total_energy_list(
+            house_list)
+        listOf_og_total_eng_lists.extend(og_total_energy_list)
+        day_total_energy_list.append(day_total_energy)
+        total_energy_list = avg_day_list[k]
+ 
+        # initialize value for total energy, total excess energy, and cost of total excess energy
+        total_energy = 0
+        total_excess_eng = 0
+        total_excess_eng_cost = 0
+
+        # calculate excess energy and cost of excess energy for each hour
+        for a in range(TIME_STEPS):
+            # calc by how much energy exceeds max limit
+            excess_eng = (total_energy_list[a] - Max_Energy) * (1/60)
+            #excess_eng = (total_energy_list[a] - Max_Energy)
+            excess_eng_cost = excess_eng * kWh_cost
+            
+            # if energy for hour exceeds max energy limit
+            if (excess_eng > 0):
+                # add excess energy to total for that energy scheme
+                total_excess_eng += excess_eng
+                # add cost addition to total cost
+                total_excess_eng_cost += excess_eng_cost
+
+        # add cost of excess eng and excess eng to lists to keep track of value for every hour
+        excess_eng_cost_list[numHousesIndex] = total_excess_eng_cost
+        excess_eng_list.append(total_excess_eng)
+    # print("excess_eng_list in estimate budget: ", excess_eng_list)
+    # print("excess_eng_cost_list in estimate budget: ", excess_eng_cost_list)
+    day_bud_list = []
+    month_bud_list = []
+    for i in range(len(num_houses_list)):
+        day_bud = excess_eng_cost_list[i] / num_houses_list[i]
+        month_bud = day_bud * 30
+        day_bud_list.append(day_bud)
+        month_bud_list.append(month_bud)
+            
+    return day_bud_list, day_bud_list, month_bud_list, listOf_og_total_eng_lists, excess_eng_cost_list, day_total_energy_list
+
+# #function to name curtailment scheme in file
+# def get_file_name(rltv_perc, favor_budget):
+#     curtail_string = ""
+#     fav_bud_string = ""
+#     #find whether curtail with percent, and if yes, whether it is relative or abs percent
+#     if curtail_percentage == True and rltv_perc == True:
+#         curtail_string = curtail_string + "Get percentage of initial energy of house for hour, then curtail by this amount consistantly"
+#     elif curtail_percentage == True and rltv_perc == False:
+#         curtail_string = curtail_string + "Curtail absolute Percentage of the Energy Left, stopping when energy of house has reached " + str(asmpt_limit * 100) +"% of original energy"
+#     elif curtail_percentage == False:
+#         curtail_string = curtail_string + "Curtail by constant value " + str(constant_curtailed_energy) + "kWh"
+#     #find if curtailment shceme favors budget
+#     if favor_budget == True:
+#         fav_bud_string = fav_bud_string + "Curtail from houses with larger Normalized Budget Values first"
+#     else:
+#         fav_bud_string = fav_bud_string + "Larger budget values do not determine curtailment"
+#     #return result to main
+#     return curtail_string, fav_bud_string
+
+# chunks from l (n = number of elements you want in each sublist), (l = list)
+
+
+def divide_chunks(l, n):
+    # looping till length list
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
+# #function that loops through energy limit and fraction of the estimated budget necissary
+
+
+def curtailment_choices(plot_day_name, plot_line_width, favor_budget, rltv_perc, curtail, optimized, make_energy_graph, broadcast, AIMD, day_bud_list, og_day_bud_list, excess_eng_cost_list, listof_og_toteng_lists,avg_day_list,representative_day, listOflist_num_SP, representative_panel_list, total_SP_list, noCurtNumHouses, minute_demand_lists, total_day_demand, hsDayEngListNOcurt, house_day_demand):
+    
+    # set initial fraction to the minimum value
+    fraction = MIN_FRACTION
+    # initialize lists that should be new for each curtailment scheme, but stay the same for each energy budget combo
+    new_total_eng_list, listOf_total_eng_lists, JFI_bud_list, JFI_eng_list, num_removed_list, list_OfFractions, \
+        post_curt_eng_lst, post_curt_cost_lst, mean_difference_budUsed_lst, strd_dvtn_budUsed_lst, excess_eng_list, percent_curtailed_list, perc_bud_used_list, sum_excess_list, new_sum_energy_list = [
+            [] for i in range(15)]
+
+    while(fraction >= MIN_FRACTION and fraction <= MAX_FRACTION):
+        # add the fraction used to a list to store for graphing and writing to file
+        list_OfFractions.append(fraction)
+        # make list of every max energy value
+        limit_list = []
+        # num_limits is the number of max energy values, used to break up long list later
+        num_limits = 0
+        # percent is the amount to curtail by
+        percent = .10
+        # for a given max energy value,
+        for k in range(len(num_houses_list)):
+            HOUSES = num_houses_list[k]
+            numHousesIndex = k
+            budget = day_bud_list[numHousesIndex]
+            og_budget = day_bud_list[numHousesIndex]
+            og_total_eng_list = listof_og_toteng_lists[numHousesIndex]
+            
+            # initialize constants and lists for each trial
+            num_curtailed, house_list, energy_list, budget_list, og_budget_list, og_eng_list, \
+                num_curtailed_list, curtailed_eng_list, total_energy_list, size_factor_list, num_removed, new_house_list, frac_tot_list = init_main_lists(HOUSES, numHousesIndex, listOflist_num_SP, total_SP_list)
+            # make house object again, this time with real value for total_excess_eng_cost
+            make_object(House, og_eng_list, energy_list, num_curtailed, budget, og_budget, house_list, size_factor_list,
+                            frac_tot_list, fraction, HOUSES, numHousesIndex, excess_eng_cost_list, listOflist_num_SP, representative_panel_list, minute_demand_lists, total_day_demand)
+            # get total energy list
+            total_energy_list, day_total_energy = get_total_energy_list(
+                house_list)
+            
+            hsDayEngListNOcurt=[]
+            for x in range(len(house_list)):
+                hsDayEng = 0
+                for r in range(TIME_STEPS):
+                    hsDayEng += house_list[x].energy_list[r]
+                hsDayEngListNOcurt.append(hsDayEng/60)
+                
+            # if curtail == True, curatil energy
+            if curtail == True:
+                 
+                  # initialize lists associated with curtailment by getting values from house object -- these lists will be altered in the curtailment function
+                  num_curtailed_list, budget_list, budget_list_enumerated, og_budget_list_enumerated, curtailed_eng_list, og_eng_list, bud_used_list = \
+                      get_curtailment_lists(curtailed_eng_list, og_eng_list, num_curtailed_list,
+                                            budget_list, og_budget_list, house_list, excess_eng_cost_list, Max_Energy, HOUSES)
+                  
+                  # curtail energy of day and return the new total energy, how much energy was curtailed, number of times curtailed
+                  total_energy_list, curtailed_eng_list, og_eng_list, num_curtailed_list, budget_list, bud_used_list, day_total_energy = curtailment(total_energy_list, curtailed_eng_list, og_eng_list,
+                                                                                                                                                 budget_list_enumerated, og_budget_list_enumerated, budget_list, og_budget_list, budget, num_curtailed_list, house_list, Max_Energy, favor_budget,
+                                                                                                                   
+                                                                                                                                                  rltv_perc, optimized, percent, make_energy_graph, excess_eng_cost_list, HOUSES,numHousesIndex,avg_day_list,representative_day, minute_demand_lists, total_day_demand)
+                  
+            if (broadcast == True):
+                    #optimization function
+                    curtailed_energy, excess, cost, sum_cost, pow_after_curtailment = optimization(optimized, excess_eng_cost_list, numHousesIndex, total_energy_list, 8,avg_day_list,representative_day, minute_demand_lists,total_day_demand)
+                    #broadcast curtailment function
+                    total_energy_list, day_total_energy = broadcast_curtailment(
+                        frac_tot_list, house_list, total_energy_list, curtailed_energy, Max_Energy, sum_cost, HOUSES,optimized, excess_eng_cost_list, numHousesIndex,avg_day_list,representative_day, minute_demand_lists, total_day_demand)
+                   
+        
+            if AIMD == True:
+                total_energy_list, day_total_energy = AIMD_curtailment(house_list, Max_Energy, HOUSES, og_total_eng_list)
+           
+            if curtail == True or broadcast == True or AIMD == True:
+                
+                # initialize lists associated with curtailment by getting values from house object -- these lists will be altered in the curtailment function
+                num_curtailed_list, budget_list, budget_list_enumerated, og_budget_list_enumerated, curtailed_eng_list, og_eng_list, bud_used_list = \
+                    get_curtailment_lists(curtailed_eng_list, og_eng_list, num_curtailed_list,
+                                          budget_list, og_budget_list, house_list, excess_eng_cost_list, Max_Energy, HOUSES)
+                
+               
+                #add new sum energy to list to be plotted.
+                new_sum_energy_list.append(day_total_energy) 
+                
+                plot_day_energy(total_energy_list, plot_day_name, plot_line_width, Max_Energy, num_houses_list[numHousesIndex], minute_demand_lists, total_day_demand)
+                
+                hsDayEngList=[]
+                bins =10
+                for x in range(len(house_list)):
+                    hsDayEng = 0
+                    for r in range(TIME_STEPS):
+                        hsDayEng += house_list[x].energy_list[r]
+                    hsDayEngList.append(hsDayEng/60)
+                
+                
+                # num_bins = 10
+                # plot2 = plt.figure(1, dpi=1200)
+                # plot2, axs1 = plt.subplots(1, 1,
+                #                         figsize =(10, 7),
+                #                         tight_layout = True)
+                # plt.hist(hsDayEngList, bins = num_bins, label='Energy Produced After Curtailment, Before Demand', alpha =0.9)
+                # plt.hist(hsDayEngListNOcurt, bins = num_bins, label='Energy Produced Before Curtailment and Demand', alpha =0.5)
+                # plt.hist(house_day_demand, bins = num_bins, label='Energy Demand', alpha =0.7)
+                # #plots average line on histogram
+                # plt.axvline(mean(hsDayEngList), color='b', linestyle='dashed', linewidth=1)
+                # plt.axvline(mean(hsDayEngListNOcurt), color='orange', linestyle='dashed', linewidth=1)
+                # plt.axvline(mean(house_day_demand), color='g', linestyle='dashed', linewidth=1)
+                # plt.title("Histogram of Total Day Energy Produced & Demand")
+                # plt.xlabel('Total Day Energy (kWh)')
+                # plt.ylabel('Number of Houses')
+                # plt.legend()
+            
+                
+          
+              # # calculate the percent of excess energy curtailed
+              #   try:
+              #     percent_curtailed = 100 - \
+              #         (new_sum_energy / sum_energy) * 100
+
+              #   except ZeroDivisionError:
+              #     percent_curtailed = 0
+              #   percent_curtailed_list.append(percent_curtailed)
+
+              # get list of percent of budget used
+                og_total_bud = 0
+                total_bud_used = 0
+                for i in range(len(og_budget_list)):
+                  og_total_bud += og_budget_list[i]
+                  total_bud_used += bud_used_list[i]
+                try:
+                    perc_bud_used = (total_bud_used / og_total_bud) * 100
+                    perc_bud_used_list.append(perc_bud_used)
+                except:
+                    perc_bud_used = 0
+                    perc_bud_used_list.append(perc_bud_used)
+
+              # make long list to break up later
+                listOf_total_eng_lists.extend(total_energy_list)
+              # calculate the jains fairness index for budget and energy
+                jains_budget, jains_energy, curtailment_norm_list = calc_jains(og_budget_list, budget_list, og_eng_list, curtailed_eng_list, HOUSES)
+             
+                #add JFIs to list to plot later
+                JFI_bud_list.append(jains_budget)
+                JFI_eng_list.append(jains_energy)
+
+              # mean_difference_budUsed, strd_dvtn_budUsed = curtailment_stats(bud_used_list, excess_eng_cost_list)
+              # mean_difference_budUsed_lst.append(mean_difference_budUsed)
+              # strd_dvtn_budUsed_lst.append(strd_dvtn_budUsed)
+            # if curatil == False, get how many houses less there can be without curtailment, and how much less energy there can be
+            if curtail == False and broadcast == False and AIMD == False:
+                
+                num_removed, new_total_energy_list, day_total_energy = no_curtailment(
+                    total_energy_list, house_list, Max_Energy, num_removed, new_house_list, HOUSES, noCurtNumHouses,minute_demand_lists, total_day_demand,avg_day_list)
+                # add values to lists
+                num_removed_list.append(num_removed)
+                new_total_eng_list.extend(new_total_energy_list)
+
+                # add new sum energy to list to be plotted.
+                new_sum_energy_list.append(day_total_energy)
+              
+                plot_day_energy(total_energy_list, plot_day_name, plot_line_width, Max_Energy, num_houses_list[numHousesIndex], minute_demand_lists, total_day_demand)
+                 
+            limit_list.append(k)
+            num_limits += 1
+        
+        #plot_kWhVSlim(limit_list, sum_excess_list, plot_day_name, new_sum_energy_list, curtail, plot_line_width)
+        # plot_hosting_capactiy(num_removed_list, HOUSES)
+        # increase budget value by some value
+        fraction += STEP_FRACTION
+    # if (len(JFI_bud_list)>0):
+    #      plot_JFI(JFI_bud_list, JFI_eng_list, plot_day_name)
+    # Creating histogram
+    
+    if curtail == True or broadcast == True or AIMD == True:
+        total_energy_list, day_total_energy = get_total_energy_list(house_list)
+        
+        return listOf_total_eng_lists, JFI_bud_list, JFI_eng_list, num_limits, limit_list, list_OfFractions, percent_curtailed_list, perc_bud_used_list, new_sum_energy_list, day_total_energy
+    else:
+        return new_total_eng_list, num_limits, limit_list, num_removed_list, new_total_energy_list, num_limits, list_OfFractions, new_sum_energy_list, noCurtNumHouses, day_total_energy, hsDayEngListNOcurt
+  
+
+
+def plot_HC(name, sum_excess_list, month_budList, percIncHC_list, line_style):
+
+    fig, ax1 = plt.subplots(dpi=1200)  
+    ax1.set_xlabel('Percent Increase in Hosting Capacity') 
+    ax1.set_ylabel('Percent of Energy Curtailed', color = 'red') 
+    ax1.set_title("Hosting Capcity vs. Energy Curtailed and Monthly Allotment")
+   
+    ax1.plot(percIncHC_list, sum_excess_list, label= name, color = 'red', linestyle= line_style) 
+    ax1.tick_params(axis ='y', labelcolor = 'red') 
+      
+    # # Adding Twin Axes
+
+    ax2 = ax1.twinx() 
+   
+    ax2.set_ylabel('Monthly Allotment ($)', color = 'blue') 
+    ax2.plot(percIncHC_list, month_budList,  label= name, color = 'blue', linestyle= line_style) 
+    ax2.tick_params(axis ='y', labelcolor = 'blue') 
+     
+    #Show plot
+    plt.legend(loc=5, prop={'size': 6})
+
+    #plt.show()
+    
+def plot_kWhVSlim(limit_list, sum_excess_list, name, new_sum_energy_list, curtail, width):
+
+    plot2 = plt.figure(2, dpi=1200)
+    x = [200, 250, 300, 350, 400]
+
+    if curtail == True:
+        plt.plot(x, new_sum_energy_list, linewidth=width,
+                 label="total power WITH curtailment: " + name)
+        plt.plot(x, sum_excess_list, linewidth=width,
+                 label="total power exceeding grid limit during curtailment: " + name)
+        plt.fill_between(x, new_sum_energy_list, sum_excess_list,
+                         facecolor="none", hatch="-", edgecolor="orange")
+        plt.fill_between(x, sum_excess_list, facecolor="none",
+                         hatch="/", edgecolor="green")
+    else:
+        plt.plot(x, new_sum_energy_list, linewidth=1,
+                 label="total day power without exceeding grid limit AND without curtailment")
+        plt.fill_between(x, new_sum_energy_list,
+                         facecolor="none", hatch="|", edgecolor="b")
+   # plt.plot(x_TIME_STEPS, pow_after_curtailment, label="optimization")
+    plt.title("kW vs Power Limit for Fleet of Houses Over a Day")
+    # plt.legend([name])
+    plt.legend(loc=5, prop={'size': 6})
+    plt.xlabel('Power Limit (kW)')
+    plt.ylabel('kW')
+
+def plot_budVkW(month_budList, kW_added, name):
+    plot3 = plt.figure(3, dpi=1200)
+    plt.plot(month_budList, kW_added, linewidth=1,
+             label= name)
+
+    plt.title("Month Budget vs. Daily Added Energy To Grid")
+    plt.legend(loc=5, prop={'size': 6})
+    plt.ylabel('Energy Added (kWh)')
+    plt.xlabel('Monthly Budget ($)')
+    
+    
+def plot_JFI(JFI_bud_list, JFI_eng_list, name):
+    plot5 = plt.figure(5, dpi=1200)
+    x = [0.5, 1, 1.5, 2, 2.5, 3, 3.5]
+    #x = [200, 225, 250,275,300,325, 350,375, 400, 425]
+    plt.plot(x, JFI_bud_list, linewidth=2, label="JFI of Budget: " + name)
+    plt.title("JFI of Budget vs Power Limit")
+    plt.legend(loc=5, prop={'size': 6})
+    plt.xlabel('Power Limit (kW)')
+    plt.ylabel('Jains Fairness Index(JFI) of Budget')
+
+    plot6 = plt.figure(6, dpi=1200)
+    plt.plot(x, JFI_eng_list, linewidth=3, label="JFI of Energy: " + name)
+    plt.title("JFI of Power vs Power Limit")
+    plt.legend(loc=5, prop={'size': 6})
+    plt.xlabel('Power Limit (kW)')
+    plt.ylabel('Jains Fairness Index(JFI) of Power')
+
+
+def plot_budget_info(budget_v_lim):
+    plot3 = plt.figure(3, dpi=1200)
+    x = [200, 250, 300, 350, 400]
+    eightDollar = [8, 8, 8, 8, 8]
+    plt.plot(x, budget_v_lim, linewidth=1,
+             label="averge total curtailment budget")
+    #plt.plot(x, eightDollar, linewidth= 1, label= "monthly Grid Participation Charge with 'net billing'")
+
+    # plt.plot(x_TIME_STEPS, pow_after_curtailment, label="optimization")
+    plt.title("House Monthly budget vs Power Limit")
+    # plt.legend([name])
+    plt.legend(loc=3, prop={'size': 6})
+    plt.xlabel('Power Limit (kW)')
+    plt.ylabel('Monthly Budget ($)')
+
+
+def plot_hosting_capactiy(num_removed_list, HOUSES):
+    PV_hosting_noCurt = []
+    for i in range(len(num_removed_list)):
+        PV_hosting_noCurt.append(HOUSES - num_removed_list[i])
+    plot4 = plt.figure(4, dpi=1200)
+    x = [200, 250, 300, 350, 400]
+    with_curt = [HOUSES, HOUSES, HOUSES, HOUSES, HOUSES]
+    plt.plot(x, with_curt, linewidth=1,
+             label="Set number of houses in curtailment scheme")
+    plt.plot(x, PV_hosting_noCurt, linewidth=1,
+             label="number of houses without exceeding grid limit and without curtailing")
+
+    plt.title("Number of Houses with PV installed")
+    plt.legend(loc=3, prop={'size': 6})
+    plt.xlabel('Power Limit (kW)')
+    plt.ylabel('Number of Houses')
+
+
+def plot_day_energy(total_energy_list, name, width, Max_Energy, numHousesIndex, minute_demand_lists, total_day_demand):
+
+    tot_eng_array = np.array(total_energy_list)
+    minute_demand_array = np.array(minute_demand_lists)
+    
+    total_energy_list = tot_eng_array - total_day_demand
+
+    plt.rcParams['figure.dpi'] = 1200
+    #x_TIME_STEPS = list(range(0, TIME_STEPS))
+    numbers = range(startTime, endTime,1)
+    x_TIME_STEPS = [number for number in numbers]
+    
+    y = total_energy_list
+    eng_lim_list = []
+    for j in range(TIME_STEPS):
+        eng_lim_list.append(Max_Energy)
+    # plt.plot(x_TIME_STEPS, y, linewidth=width,
+    #           label="Power Limit: " + str(Max_Energy))
+    numHousesIndex = str(numHousesIndex)
+    plt.plot(x_TIME_STEPS, y, linewidth=width,
+             label= name + " (" + numHousesIndex + " Houses)")
+    plt.plot(x_TIME_STEPS, eng_lim_list, linewidth=1, linestyle="--")
+    #,label="Power Limit: " + str(Max_Energy)+" kW")
+    plt.title("Power Output vs. Time")
+    # plt.legend([name])
+    plt.legend(loc=1, prop={'size': 6})
+    plt.xlabel('Minutes')
+    plt.ylabel('Power (kW)')
+    plt.axhline(y=0,linewidth=.5, color='k')
+    #plt.ylim((0,35))
+
+
+def init_main_lists(HOUSES, numHousesIndex, listOflist_num_SP, total_SP_list):
+    # make empty lists and initialize variables to be used in functions
+    num_curtailed = 0
+
+    # initialize all empty lists
+    house_list, energy_list, budget_list, og_budget_list, og_eng_list, num_curtailed_list, curtailed_eng_list, total_energy_list, size_factor_list, frac_tot_list, new_house_list, \
+        = [[] for i in range(11)]
+
+    # starting off, the number of households removed is zero
+    num_removed = 0
+    listnumSP = listOflist_num_SP[numHousesIndex]
+    totalSP = total_SP_list[numHousesIndex]
+    # make empty lists to be filled in other functions
+    for i in range(0, HOUSES):
+        curtailed_eng_list.append(0)
+        og_eng_list.append(0)
+        num_curtailed_list.append(0)
+        budget_list.append(0)
+        og_budget_list.append(0)
+        
+        # make size factor list
+        size_factor = listnumSP[i] / mean_num_SP
+        size_factor_list.append(size_factor)
+
+        # make fraction of total listof_toteng_lists
+        frac_tot = listnumSP[i] / totalSP
+        frac_tot_list.append(frac_tot)
+
+    # # make a list of energy to be plotted
+    # for i in range(TIME_STEPS):
+    #     Max_Energy_list.append(Max_Energy)
+    #     Single_Max_Energy_list.append(Single_Max_Energy)
+
+    return num_curtailed, house_list, energy_list, budget_list, og_budget_list, og_eng_list, \
+        num_curtailed_list, curtailed_eng_list, total_energy_list, size_factor_list, num_removed, new_house_list, frac_tot_list
+
+# #function to calculate energy of house in 1 hr
+# def get_energy_list(extra_energy_list, house_index):
+#     energy_list = []
+#     size_factor = list_num_SP[house_index] / mean_num_SP
+#     for i in range(TIME_STEPS):
+#         #if no sunlight, no energy
+#         if i < 6 or i > 18:
+#             energy = 0
+#             energy_list.append(energy)
+#         else:
+#             energy = (((6**2)-((i-12)**2) + extra_energy_list[i]) / 10) * size_factor
+#             #get energy value from array returned by pow
+#             #add energy value to the list of the house
+#             energy = energy[0]
+#             energy_list.append(energy)
+#     else:
+#         return energy_list
+
+# #function to calculate energy of house in 1 hr
+# def get_energyData_list(house_index):
+#     SPday_pow_list = []
+#     energy_list = []
+#     #https://www.educative.io/edpresso/how-to-read-a-csv-file-in-python
+#     with open(r"C:\Users\rebec\github\Solar-PV-Curtailment\test.csv") as csvFile:   #open the file
+#       CSVdata = csv.reader(csvFile, delimiter=',')  #read the data
+#       for row in CSVdata:   #loop through each row
+#         SPday_pow_list.append(row)
+#     csvFile.close()   #close the file
+#     #make list of lists of strings into single list of floats
+#     SPday_pow_list = list(itertools.chain(*SPday_pow_list))
+#     SPday_pow_list = map(float, SPday_pow_list)
+#     SPday_pow_list = list(SPday_pow_list)
+
+#     for i in range(TIME_STEPS):
+#         energy = (list_num_SP[house_index] * SPday_pow_list[i]) / 1000
+#         energy_list.append(energy)
+#         #add energy value to the list of the house
+#     return energy_list
+
+
+def optimization(optimized, excess_eng_cost_list, numHousesIndex, total_energy_list, current_ts, avg_day_list, representative_day, minute_demand_lists, total_day_demand):
+    opt_total_energy_list = []
+    #avg_day = avg_day_list[numHousesIndex]
+    #opt_total_energy_list.extend(avg_day[current_ts:endTime+1])
+    
+    
+    tot_eng_array = np.array(total_energy_list[current_ts:endTime+1])
+    total_demand_array = np.array(total_day_demand[current_ts:endTime+1])
+
+    eng_to_grid = tot_eng_array - total_demand_array
+    
+    opt_total_energy_list.extend(eng_to_grid)
+    
+    # define Variables and Parameters scalars and vectors
+    # amount of money spent on curtailment (vector), determined by opt
+    cost = cp.Variable(TIME_STEPS-current_ts)
+    # how many kWh of energy curtailed per hour (vector), det by opt
+    curtail = cp.Variable(TIME_STEPS-current_ts)
+    # amount of energy not curtailed per hour (vector)
+    excess = cp.Variable(TIME_STEPS-current_ts, nonneg=True)
+    # amount of energy necessary to curtail per hour (vector)
+    overload = cp.Variable(TIME_STEPS-current_ts, nonneg=True)
+
+    budget_total = cp.Parameter()  # total amount of budget allowed for day (scalar)
+    kWh_cost = cp.Parameter()  # cost of 1 kWh of energy (scalar)
+    # amount of energy generated by PV per hour (vector)
+    energy = cp.Parameter(TIME_STEPS-current_ts)
+    sum_cost = cp.Parameter()  # running total of cost spent over day (scalar)
+    # limit on amount of energy that can be sent to grid in one hour (scalar)
+    energy_limit = cp.Parameter()
+    #eng_lim_list = cp.Parameter(TIME_STEPS)
+
+    # give parameters inital values
+    budget_total.value = excess_eng_cost_list[numHousesIndex]
+    kWh_cost.value = .1
+    sum_cost.value = 0
+    energy_limit.value = Max_Energy
+    energy.value = opt_total_energy_list
+    #rep_day_list[numHousesIndex]
+    
+    # create constraints
+    constraints = [curtail >= 0, sum_cost <= budget_total]
+
+#excess >= 0, overload >= 0
+    overload = energy - energy_limit
+    # define excess energy as the amount of energy remaining over the limit after curtailment
+    excess = overload - curtail
+    # calculate the cost of energy curtailed
+    cost = curtail * kWh_cost * 1/60
+    sum_cost = sum(cost)
+    # get the sum of squares of excess so that all vlaues are positive in average -----?
+    # why would we care about if energy is below the limit?
+    sum_excess = cp.sum_squares(excess)
+    # objective is to minimize the excess
+    obj = cp.Minimize(sum_excess)
+    # solve the problem with the given constraints and objective
+    prob = cp.Problem(obj, constraints)
+    #prob.solve(solver=cp.GUROBI, verbose=False)
+    #prob.solve(verbose=False)
+    #Verbose prints optimization solver information
+    prob.solve(solver=cp.GUROBI, verbose=False)
+
+    curtail_val = curtail.value
+    excess_val = excess.value
+    sum_excess_val = sum_excess.value
+    cost_val = cost.value
+    sum_cost_val = sum_cost.value
+    overload_val = overload.value
+
+    pow_after_curtailment = []
+    zip_list = zip(representative_day, curtail_val)
+    for list1_i, list2_i in zip_list:
+        pow_after_curtailment.append(list1_i-list2_i)
+
+    # if (optimized == True):
+    #     plot1 = plt.figure(1, dpi=1200)
+    #     x_TIME_STEPS = list(range(1, 25))
+    #     y = representative_day
+    #     plt.plot(x_TIME_STEPS, excess_val, label="excess")
+    #     plt.plot(x_TIME_STEPS, overload_val, label="overload", linestyle = "--")
+    #     plt.plot(x_TIME_STEPS, curtail_val, label="curtail")
+    #     plt.plot(x_TIME_STEPS, y, label="uncurtailed power(kW)")
+    #     plt.plot(x_TIME_STEPS, pow_after_curtailment, label="optimized curtailed power(kW)")
+    #     plt.title("Optimization Power")
+    #     plt.legend(loc=2, prop={'size': 6})
+    #     plt.xlabel('TIME_STEPS')
+    #     plt.ylabel('Power (kW)')
+
+    # round curtailment list to eliminate very small numbers essentially equivalent to zero.
+    curtail_list = [round(num) for num in curtail_val]
+  
+    return curtail_list, excess_val, cost_val, sum_cost_val, pow_after_curtailment
+
+# def is_dcp(self, dpp: bool = False) -> bool:
+#         """Checks whether the constraint is DCP.
+
+#         Returns
+#         -------
+#         bool
+#             True if the constraint is DCP, False otherwise.
+#         """
+#         raise NotImplementedError()
+
+# define house class
+
+
+class House:
+    def __init__(house, og_eng_list, energy_list, num_curtailed, budget, og_budget):
+        # initialize the aspects of the class
+        house.og_eng_list = og_eng_list
+        # list of ints
+        house.energy_list = energy_list
+        house.num_curtailed = num_curtailed
+        house.budget = budget
+        house.og_budget = og_budget
+
+
+def make_object(House, og_eng_list, energy_list, num_curtailed, budget, og_budget, house_list, size_factor_list,
+                frac_tot_list, fraction, HOUSES, numHousesIndex, excess_eng_cost_list, listOflist_num_SP, representative_panel_list, minute_demand_lists, total_day_demand):
+    for j in range(0, HOUSES):
+        house = House(og_eng_list, energy_list,
+                      num_curtailed, budget, og_budget)
+        #energy_list =  get_energyData_list(j)
+        # this is arbitrary for now
+        #energy_list = [0, 0, 0, 0, 0, 0, 10, 20, 55, 30, 35, 40, 30, 35, 35, 30, 25, 20, 0, 0, 0, 0, 0, 0]
+        list_num_SP = listOflist_num_SP[numHousesIndex]
+        list_eng_set = [element * list_num_SP[j]
+                        for element in representative_panel_list[j]]
+        
+       
+        energy_list = (list_eng_set)
+        stagnant_eng_list = tuple(energy_list)
+        house.og_eng_list = stagnant_eng_list
+        house.energy_list = energy_list
+        house.og_budget = budget * size_factor_list[j]
+        house.budget = budget * size_factor_list[j]
+        #house.budget = frac_tot_list[j] * excess_eng_cost_list[numHousesIndex] * (fraction)
+        #house.og_budget = frac_tot_list[j] * excess_eng_cost_list[numHousesIndex] * (fraction)
+        # house.budget = excess_eng_cost_list[numHousesIndex] * (fraction)*(1/HOUSES)
+        # house.og_budget = excess_eng_cost_list[numHousesIndex] * (fraction)*(1/HOUSES)
+        
+        # add house object to list of houses
+        house_list.append(house)
+
+        
+
+# sent to this function every hour to calculate percent to curtail for each house in that hour
+
+
+def percent_curtailment(house_list, hour, percent, HOUSES):
+    limit_perc_eng_list = []
+    rltv_perc_eng_list = []
+    for i in range(0, HOUSES):
+        rltv_perc_eng = (house_list[i].energy_list[hour] * percent)
+        rltv_perc_eng_list.append(rltv_perc_eng)
+
+        limit_perc_eng = (house_list[i].energy_list[hour] * asmpt_limit)
+        limit_perc_eng_list.append(limit_perc_eng)
+
+    return rltv_perc_eng_list, limit_perc_eng_list
+
+# make a mega list of total energy over day
+
+
+def get_total_energy_list(house_list):
+    total_energy_list = []
+    sum_energy = 0
+    day_total_energy = 0
+    # for each hour
+    for i in range(TIME_STEPS):
+        # initialize total energy for each hour
+        total_energy = 0
+        og_total_energy = 0
+        # for each house
+        # used to be range(len(house_list))
+        # for k in range(0, HOUSES):
+        for k in house_list:
+            # get energy of that house for that hour
+       
+            energy = k.energy_list[i]
+          
+            total_energy += energy
+            
+        # add energy of i hour to total energy list
+        total_energy_list.append(total_energy)
+        day_total_energy += total_energy / 60
+        #print("day_total_energy for ", i, ": ", day_total_energy)
+    return total_energy_list, day_total_energy
+
+
+def get_enumerated(given_list):
+    tup_enumerated = enumerate(given_list)
+    given_list_enumerated = []
+    for b in tup_enumerated:
+        # make tuple into list
+        pair = list(b)
+        # reverse order of enumeration
+        pair = pair[::-1]
+        # add pair to enumerated list
+        given_list_enumerated.append(pair)
+    return given_list_enumerated
+
+# function to get the ratio between remaining budget and original budget.
+
+
+def get_rltv_bud_enum(budget_list_enumerated, og_budget_list_enumerated):
+    rltv_budget_list = []
+    for i in budget_list_enumerated:
+        mini_list = []
+        rltv_budget_index = i[1]
+        try:
+            rltv_budget = i[0] / \
+                og_budget_list_enumerated[rltv_budget_index][0]
+            mini_list.append(rltv_budget)
+            mini_list.append(rltv_budget_index)
+        except ZeroDivisionError:
+            # if there is no excess energy, no curtailment and therefore budget is the same as beginning
+            rltv_budget = 1
+            mini_list.append(rltv_budget)
+            mini_list.append(rltv_budget_index)
+        rltv_budget_list.append(mini_list)
+    return rltv_budget_list
+
+
+def get_curtailment_lists(curtailed_eng_list, og_eng_list, num_curtailed_list, budget_list, og_budget_list, house_list,
+                          excess_eng_cost_list, Max_Energy, HOUSES):
+    # why is bud_used_list here?
+    bud_used_list = []
+
+    # calculate amount of energy curtailed from each house and add to list
+    for i in range(0, HOUSES):
+        # make a list of the number of times each house was curtailed from
+        num_curtailed_list[i] = house_list[i].num_curtailed
+
+        # make list of budgets of each house
+        budget_list[i] = house_list[i].budget
+        og_budget_list[i] = house_list[i].og_budget
+
+        # get lists for specific house
+        hs_englist_curt = house_list[i].energy_list
+        hs_englist_og = house_list[i].og_eng_list
+       
+        house_energy_curt = 0
+        house_energy_og = 0
+        curtailed_eng = 0
+        total_energy_og = 0
+
+        # find the amount of energy curtailed for each house over the day
+        for j in range(TIME_STEPS):
+            # sum energy curtailed from that house over day
+            house_energy_curt += hs_englist_curt[j]
+            # sum energy over day w/out curtailment
+            house_energy_og += hs_englist_og[j]
+
+        # get difference in energy
+        curtailed_eng = house_energy_og - house_energy_curt
+        # add to list of curtiled energy for each house
+        curtailed_eng_list[i] = curtailed_eng
+        # add originial energy of house to house_energy_og_list
+        og_eng_list[i] = house_energy_og
+        # https://stackoverflow.com/questions/6422700/how-to-get-indices-of-a-sorted-array-in-python
+    budget_list_enumerated = get_enumerated(budget_list)
+    og_budget_list_enumerated = get_enumerated(og_budget_list)
+
+    # now get difference between originial and altered budget
+    for l in range(len(budget_list_enumerated)):
+        bud_used = og_budget_list_enumerated[l][0] - \
+            budget_list_enumerated[l][0]
+        bud_used_list.append(bud_used)
+    return(num_curtailed_list, budget_list, budget_list_enumerated, og_budget_list_enumerated, curtailed_eng_list, og_eng_list, bud_used_list)
+
+# #when curtail == False, this function gets energy and number of houses in scheme
+
+
+def no_curtailment(total_energy_list, house_list, Max_Energy, num_removed, new_house_list, HOUSES, noCurtNumHouses,minute_demand_lists, total_day_demand, avg_day_list):
+    #max energy reached in the day
+    max_total_pwr = max(avg_day_list[0])
+    #Total Excess Power
+    ExcessPwrEstimation = max_total_pwr - Max_Energy
+    #average maximum power for single house
+    pwrPerHouse = max_total_pwr/ min_HOUSES
+
+    num_removed = int(ExcessPwrEstimation // pwrPerHouse)
+
+    for i in range(0,num_removed):
+        house_list.remove(house_list[0])
+        
+    new_total_energy_list, day_total_energy = get_total_energy_list(house_list)
+        
+    plot_day_energy(new_total_energy_list, "Conservative Hosting Capacity", 1, Max_Energy, len(house_list),minute_demand_lists, total_day_demand)
+    return num_removed, new_total_energy_list, day_total_energy
+
+
+def broadcast_curtailment(frac_tot_list, house_list, total_energy_list, curtailed_energy, Max_Energy,sum_cost, HOUSES, optimized, excess_eng_cost_list, numHousesIndex,avg_day_list,representative_day, minute_demand_lists, total_day_demand):
+    #plot_day_energy(total_energy_list, "before curtailment", 2, Max_Energy, minute_demand_lists)
+    final_pow_sum_list = []
+    
+    curtailed_energy, excess, cost, sum_cost, pow_after_curtailment = optimization(optimized, excess_eng_cost_list, numHousesIndex, total_energy_list, 0,avg_day_list,representative_day, minute_demand_lists, total_day_demand)
+
+    for r in range(0, TIME_STEPS):
+        if (r % 30 == 0):
+            curtailed_eng, excess, cost, sum_cost, pow_after_curtailment = optimization(optimized, excess_eng_cost_list, numHousesIndex, total_energy_list, r,avg_day_list,representative_day, minute_demand_lists, total_day_demand)
+            zero_list = []
+            for i in range(0, r):
+                zero_list.append(0)
+            curtailed_energy = [*zero_list, *curtailed_eng]
+         
+        tot_min_curtail = curtailed_energy[r]
+        final_pow_sum = 0
+        if(total_energy_list[r] - Max_Energy > 0):
+            for x in range(0, HOUSES):
+                # state of power
+                current_pow = house_list[x].energy_list[r]
+                curtailed_pow = tot_min_curtail * frac_tot_list[x]
+                final_hr_pow = current_pow - curtailed_pow
+    
+                # state of budget
+                current_bud = house_list[x].budget
+                curtailed_bud = (curtailed_pow / 60) * kWh_cost 
+                final_hr_bud = current_bud - curtailed_bud
+        
+                # if curtailing intended amount is permissible
+                if (final_hr_bud > 0 and final_hr_pow>0):
+                    house_list[x].energy_list[r] = final_hr_pow
+                    house_list[x].budget = final_hr_bud
+                    
+                else:
+                    # final_hr_pow = 0
+                    # house_list[x].budget = house_list[x].energy_list[r] * kWh_cost
+                    # house_list[x].energy_list[r] = final_hr_pow
+                    pass
+        else:
+            pass
+        final_pow_sum_list.append(final_pow_sum)
+    total_energy_list, day_total_energy = get_total_energy_list(
+        house_list)
+ 
+    return total_energy_list, day_total_energy
+
+def curtailment(total_energy_list, curtailed_eng_list, og_eng_list, budget_list_enumerated, og_budget_list_enumerated, budget_list, og_budget_list, budget, num_curtailed_list, house_list,
+                Max_Energy, favor_budget, rltv_perc, optimized, percent, make_energy_graph, excess_eng_cost_list, HOUSES, numHousesIndex,avg_day_list,representative_day, minute_demand_lists,total_day_demand):
+    used_houses = []
+    break_count = 0
+    pass_count = 0
+    # list of houses whose energy is used up for a given hour.
+    hr_eng_finished = []
+    # get list of budgets
+    more_possibilities = True
+    curtailed_energy, excess, cost, sum_cost, pow_after_curtailment = optimization(optimized, excess_eng_cost_list, numHousesIndex, total_energy_list, 0,avg_day_list,representative_day, minute_demand_lists,total_day_demand)
+
+    for j in range(TIME_STEPS):
+        eng_to_curtail = total_energy_list[j] - Max_Energy
+        # call optimization function
+        if (j % 30 == 0):
+            curtailed_energy, excess, cost, sum_cost, pow_after_curtailment = optimization(optimized, excess_eng_cost_list, numHousesIndex, total_energy_list, j, avg_day_list, representative_day, minute_demand_lists,total_day_demand)
+            zero_list = []
+            for i in range(0, j):
+                zero_list.append(0)
+            curtailed_energy = [*zero_list, *curtailed_energy]
+          
+        budget_list_enumerated = budget_list_enumerated + used_houses + hr_eng_finished
+        # clear these lists so they can be repopulated again.
+        used_houses.clear()
+        hr_eng_finished.clear()
+        # get the cutoff percent limit for every house - once the budget has been curtailed to this point
+        rltv_perc_eng_list, limit_perc_eng_list = percent_curtailment(
+            house_list, j, percent, HOUSES)
+        rltv_budget_list_enumerated = get_rltv_bud_enum(
+            budget_list_enumerated, og_budget_list_enumerated)
+
+        original_total_hr_energy = total_energy_list[j]
+        # if the total energy is greater than it should be,
+        
+        # while(total_energy_list[j] > Max_Energy and more_possibilities == True):
+        while(more_possibilities == True):
+            if (optimized == False):
+                if (total_energy_list[j] > Max_Energy):
+                    pass
+                else:
+                    break
+            if (optimized == True):
+                hr_amount_curtailed = original_total_hr_energy - \
+                    total_energy_list[j]
+                # print("original_total_hr_energy: ", original_total_hr_energy)
+                # print("total_energy_list[j]: ", total_energy_list[j])
+                # print("hr_amount_curtailed:" , hr_amount_curtailed)
+                # print("eng_to_curtail: ", eng_to_curtail)
+                # print("curtailed_energy[j]: ", curtailed_energy[j])
+                # print("------------------------------------------------")
+                if (hr_amount_curtailed < curtailed_energy[j] and eng_to_curtail > 0):
+                    pass_count += 1
+                    pass
+                else:
+                    break_count += 1
+                    break
+            # first get the index number of the house to curtail
+
+            if favor_budget == False:
+                # generate a random number of a house to be curtailed from
+                if (len(budget_list_enumerated) != 0):
+                    bud_pair = random.choice(
+                        [sublist for sublist in budget_list_enumerated])
+                    num_house = bud_pair[1]
+                else:
+                    more_possibilities = False
+                    continue
+
+            # favor budget is true
+            else:
+                # get house with max budget left
+                #max_bud = max([sublist[-1] for sublist in budget_list_enumerated])
+                rltv_max = max(
+                    [sublist for sublist in rltv_budget_list_enumerated])
+                num_house = rltv_max[1]
+                for f in budget_list_enumerated:
+                    if num_house in f:
+                        bud_pair = f
+
+        # Next, get amount to curtail from house
+            if rltv_perc == True:
+
+                # index to houses given amount to curtail
+                if (house_list[num_house].energy_list[j] - (house_list[num_house].energy_list[j] * percent)) > limit_perc_eng_list[num_house]:
+                    amount_curtailed = house_list[num_house].energy_list[j] * percent
+                else:
+
+                    amount_curtailed = house_list[num_house].energy_list[j]
+                    if favor_budget == True:
+                        rltv_budget_list_enumerated.remove(rltv_max)
+
+            else:
+
+                # index to houses given amount to curtail
+               
+                amount_curtailed = rltv_perc_eng_list[num_house]
+        # Now, curtail num_house with amount_curtailed
+
+            # save the remaining budget and energy as variables
+            remaining_bud = house_list[num_house].budget
+            remaining_eng = house_list[num_house].energy_list[j]
+            # if the percent amount curtailed does not use up the budget, then curtail that amount of energy
+
+            if (remaining_bud - (kWh_cost * amount_curtailed * 1/60) > 0 and remaining_eng - amount_curtailed > 0):
+
+                house_list[num_house].num_curtailed = house_list[num_house].num_curtailed + 1
+                # subtract the cost of energy lost from their budget
+                house_list[num_house].budget = house_list[num_house].budget - \
+                    (kWh_cost * amount_curtailed * 1/60)
+                # set the energy of that house for the given hour to updated value
+                house_list[num_house].energy_list[j] = house_list[num_house].energy_list[j] - amount_curtailed
+                budget_list_enumerated.remove(bud_pair)
+                bud_pair[0] = house_list[num_house].budget
+                used_houses.append(bud_pair)
+
+                # what is happening here, why is this necissary?
+                if favor_budget == True:
+                    rltv_budget_list_enumerated.remove(rltv_max)
+
+            # if the percent amount curtailed is too much, but you can use up the energy and the budget will still be > 0, use up budget
+            elif (remaining_bud - (kWh_cost * remaining_eng * 1/60) > 0 and remaining_eng > 0):
+
+                house_list[num_house].num_curtailed += house_list[num_house].num_curtailed + 1
+                # subtract all possible energy, effectively using up energy
+                house_list[num_house].budget = house_list[num_house].budget - \
+                    (kWh_cost * remaining_eng * 1/60)
+                # set the energy of that house for the given hour to zero
+                house_list[num_house].energy_list[j] = 0
+                budget_list_enumerated.remove(bud_pair)
+                bud_pair[0] = house_list[num_house].budget
+                if favor_budget == True:
+                    rltv_budget_list_enumerated.remove(rltv_max)
+                hr_eng_finished.append(bud_pair)
+            # if the percent amount curtailed is too much and curtailing the rest of the energy is also too much, use up budget
+            else:
+
+                house_list[num_house].num_curtailed += house_list[num_house].num_curtailed + 1
+                house_list[num_house].energy_list[j] = house_list[num_house].energy_list[j] - (
+                    remaining_bud / kWh_cost)
+              
+                house_list[num_house].budget = 0
+                budget_list_enumerated.remove(bud_pair)
+                bud_pair[0] = house_list[num_house].budget
+                if favor_budget == True:
+                    rltv_budget_list_enumerated.remove(rltv_max)
+
+            # if all houses have been curtailed from, clear record in list
+            if (len(budget_list_enumerated) == 0 and len(used_houses) != 0):
+                budget_list_enumerated = used_houses
+                budget_list_enumerated = sorted(
+                    budget_list_enumerated, key=operator.itemgetter(1))
+                # used_houses.clear()
+                used_houses = []
+
+            # if both lists are empty, curtailment is not possible anymore and while loop terminates.
+            if (len(budget_list_enumerated) == 0 and len(used_houses) == 0):
+                more_possibilities = False
+            # there are no more houses with energy to curtail for that hour
+
+            total_energy_list, day_total_energy = get_total_energy_list(
+                house_list)
+            rltv_budget_list_enumerated = get_rltv_bud_enum(
+                budget_list_enumerated, og_budget_list_enumerated)
+
+    total_energy_list, day_total_energy = get_total_energy_list(
+        house_list)
+   
+    num_curtailed_list, budget_list, budget_list_enumerated, og_budget_list_enumerated, curtailed_eng_list, og_eng_list, bud_used_list = \
+        get_curtailment_lists(curtailed_eng_list, og_eng_list, num_curtailed_list,
+                              budget_list, og_budget_list, house_list, excess_eng_cost_list, Max_Energy, HOUSES)
+
+    # print("pass_count: ", pass_count)
+    # print("break_count:" , break_count)
+    return total_energy_list, curtailed_eng_list, og_eng_list, num_curtailed_list, budget_list, bud_used_list, day_total_energy
+
+# function to calculate difference in energy between two lists
+def AIMD_curtailment(house_list, Max_Energy, HOUSES, og_total_eng_list):
+    #get total_energy list to begin
+    total_energy_list, day_total_energy = get_total_energy_list(house_list)
+    #start with AIMD false until otherwise proven
+    AIMD = False
+    a = .01
+    #for given time step
+    for i in range(TIME_STEPS - 1):
+        #if MD happened in last hour and curtailment necessary in this hour
+        if (total_energy_list[i] < Max_Energy and AIMD == True):
+            for x in range(HOUSES):
+                #house_list[x].energy_list[i+1] = min(house_list[x].energy_list[i]+a, house_list[x].og_eng_list[i+1])
+                if house_list[x].energy_list[i]+a > house_list[x].og_eng_list[i+1]:
+                    house_list[x].energy_list[i+1] = house_list[x].og_eng_list[i+1]
+                    print("equal to the actual power value at: ", i)
+                else:
+                    house_list[x].energy_list[i+1] = house_list[x].energy_list[i]+a
+                    print("equal to the additive increase value power value at: ", i)
+            #get new total_energy list after AI
+            total_energy_list, day_total_energy = get_total_energy_list(house_list)
+        
+        #just for before the first multiplicative decrease 
+        elif (total_energy_list[i] < Max_Energy and AIMD == False) :
+            pass
+       
+        else:
+           print("MD at: ", i)
+           #curtailment necessary
+           AIMD = True
+           excess = og_total_eng_list[i] - Max_Energy
+           B = .95 - (excess / og_total_eng_list[i])
+           print("B: ", B)
+           for x in range(HOUSES):
+               #Use AIMD on houses
+               house_list[x].energy_list[i+1] = house_list[x].energy_list[i+1] * B
+           #calculate new total energy list: (assuming this happens immediately after MD & before next min) 
+           total_energy_list, day_total_energy = get_total_energy_list(house_list)
+    return total_energy_list, day_total_energy
+
+def differenceIn_energy(listof_newtoteng_lists, listof_toteng_lists):
+    # initialize list to hold difference in energy between curtailment and no curtailment
+    eng_difference_list = []
+    # cycle through the lists in list of lists
+    for f in range(len(listof_newtoteng_lists)):
+        # get name for list
+        new_toteng_list = listof_newtoteng_lists[f]
+        toteng_list = listof_toteng_lists[f]
+        # set total energy to zero in beginning of each list
+        total_energy = 0
+        new_total_energy = 0
+        # cycle through TIME_STEPS in day to calculate total energy generated
+        for i in range(TIME_STEPS):
+            listof_newtoteng_lists[f]
+            total_energy += toteng_list[i] / 60
+            new_total_energy += new_toteng_list[i] / 60
+        # calc difference between energy
+        # print("tot eng: ", total_energy)
+        # print("new_total_energy: ", new_total_energy)
+        energy_difference = total_energy - new_total_energy
+        # add energy difference to list
+
+        eng_difference_list.append(energy_difference)
+
+    return eng_difference_list
+
+# calculate jains fairness index for budget
+
+
+def calc_jains(og_budget_list, budget_list, og_eng_list, curtail_list, HOUSES):
+
+    # sum_x = 0
+    # sum_x_sqd = 0
+    # curtailment_norm_list = []
+    # # calculate JFI of budget
+    # for i in budget_list:
+    #     sum_x += i
+    #     sum_x_sqd += (i**2)
+    # try:
+    #     jains_budget = (sum_x**2) / (HOUSES * sum_x_sqd)
+    # except ZeroDivisionError:
+    #     jains_budget = 1.0
+   # calculate JFI of budget in different way
+    curtailment_norm_list = []
+    sum_x = 0
+    sum_x_sqd = 0
+    #print("budget_list", budget_list)
+    
+    # #calculations to figure out actual budget being used
+    # budArray = np.asarray(budget_list)
+    # OGbudArray = np.asarray(og_budget_list)
+    # bud_used_list = OGbudArray - budArray
+    # bud_used = sum(bud_used_list)
+
+    
+    for i in range(0, HOUSES):
+        try: 
+            curtailment_norm = (
+                og_budget_list[i] - budget_list[i]) / og_budget_list[i]
+    
+        except:
+            curtailment_norm = 1
+            
+        curtailment_norm_list.append(curtailment_norm)
+        sum_x += curtailment_norm
+        sum_x_sqd += curtailment_norm**2
+        
+            
+        try:
+            jains_budget = (sum_x**2) / (HOUSES * sum_x_sqd)
+        except:
+            jains_budget = 1
+            
+    # calculate JFI of energy
+    sum_x = 0
+    sum_x_sqd = 0
+
+    for i in range(0, HOUSES):
+        try:
+            curtailment_norm = (og_eng_list[i] - curtail_list[i]) / og_eng_list[i]
+        except: 
+            curtailment_norm = 1
+        curtailment_norm_list.append(curtailment_norm)
+        sum_x += curtailment_norm
+        sum_x_sqd += curtailment_norm**2
+
+        jains_energy = (sum_x**2) / (HOUSES * sum_x_sqd)
+
+    return(jains_budget, jains_energy, curtailment_norm_list)
+
+# #plot results
+# def plot(listOf_total_eng_lists, Max_Energy, Max_Energy_list):
+#     # Plot in different subplots
+#     fig1, ax = plt.subplots()  # Create a figure containing a single axes.
+#     ax.plot(Max_Energy_list)  # Plot some data on the axes.
+#     ax.plot(listOf_total_eng_lists)
+
+#     plt.title('Total Energy Over Day')
+#     plt.xlabel('Time')
+#     plt.ylabel('kWh')
+
+#     fig1.show()
+#     fig1.savefig("Total_energy.png")
+# #list1, list2, list3, list4, list5, list6, list7, limit_list, is_bud_list, is_memory
+# def JFI_plot(list_of_lists, plot_name, limit_list, curtail_percentage, favor_budget, rltv_perc):
+#     # Plot in different subplots
+#     fig2, ax = plt.subplots()  # Create a figure containing a single axes.
+#     #ax.plot(limit_list, budget1_list, label = "$1 budget")  # Plot some data on the axes.
+#     #p subject to change depending on starting budget
+#     p = 0
+#     index = 0
+#     for f in list_of_lists:
+#         index = list_of_lists.index(f)
+#         name = str(MIN_FRACTION + (STEP_FRACTION * index))
+#         ax.plot(limit_list, f, label = name)
+#         p += 1
+#     # ax.plot(limit_list, list7_mem, label = "$19 budget (memory)")
+#     #set limits and turn off autoscale
+#     # plt.xlim(MIN_ENG_LIM, max(limit_list))
+#     # plt.ylim(.85, 1.05)
+#     plt.title(plot_name + "\n" + "(curtail_percentage = "+ str(curtail_percentage) + ", " + "rltv_perc = " \
+#     + str(rltv_perc) + ", " + "favor_budget = " + str(favor_budget) + ")")
+#     plt.xlabel('Energy Limit')
+#     plt.ylabel('JFI')
+#     plt.legend()
+
+#     fig2.show()
+#     fig2.savefig(plot_name)
+
+#     #plot results
+# def plot_histogram(house_list, num_curtailed_list, Max_Energy, jains_budget, budget):
+#     # Plot in different subplots
+#     #get the max number of times a house was curtailed
+#     max_num_curt = max(num_curtailed_list)
+#     #make a straight line of JFI of budget
+#     jains_line = []
+#     for i in range(max_num_curt + 1):
+#         jains_line.append(jains_budget)
+#     #make figure
+#     fig3, ax = plt.subplots()  # Create a figure containing a single axes.
+#     hist = {}
+#     for i in num_curtailed_list:
+#         hist[i] = hist.get(i, 0) + 1
+#     all_values = hist.values()
+#     max_value = max(all_values)
+#     for i in hist:
+#         #race_per_hundredk[race] = (hist[i] / float(mapping[max_value])) * 100000
+#         hist[i] = (hist[i] / max_value)
+
+#     plt.bar(list(hist.keys()), hist.values(), color='g')
+#     ax.plot(jains_line)#, label = jains_budget
+#     # plt.hist(normalized_num_curt, bins = 10)
+#     plt.title('Number of Times Curtailed')
+#     plt.xlabel('Number of Times Curtailed')
+#     plt.ylabel('Number of Houses')
+#     plt.show()
+
+#     fig3.savefig("Histogram.png")
+
+# def curtailment_stats(listOfLists, name):
+#     num_trials = len(listOfLists)
+#     mean_difference_list = []
+#     strd_dvtn_list = []
+#     JFI_eng = open("JFI_eng.txt", "a")
+#     JFI_eng.write("(Negative difference means second JFI trial is typically greater than first)" + "\n" + \
+#     "(Positive JFI difference means second JFI trial is typically smaller than first)" + "\n\n")
+
+#     for i in range(num_trials):
+#         main_list = listOfLists[i]
+#         index_main_list = listOfLists.index(main_list)
+#         while (i + 1) < num_trials:
+#             compare_list = listOfLists[i + 1]
+#             index_compare_list = listOfLists.index(compare_list)
+#             difference_list = []
+#             difference = 0
+#             sum_diff = 0
+#             strd_dvtn = 0
+#             for f in range(num_trials):
+#                 #get the difference between the JFIs
+#                 difference = main_list[f] - compare_list[f]
+#                 #add the difference to the list
+#                 difference_list.append(difference)
+#                 #add the difference to the total
+#                 sum_diff += difference
+
+#             mean_difference = sum_diff / num_trials
+#             mean_difference_list.append(mean_difference)
+#             for j in range(num_trials):
+#                 sum_diff_sqrd = (difference_list[j] - mean_difference)**2
+#                 strd_dvtn += (sum_diff_sqrd / num_trials)**(1/2)
+#             strd_dvtn = strd_dvtn / num_trials
+#             strd_dvtn_list.append(strd_dvtn)
+#             JFI_eng.write(name + " of trial " + str(index_main_list) + " minus trial " + str(index_compare_list) + " has an average value of " + str(round(difference, 6)) + \
+#             " with a standard deviation of " + str(round(strd_dvtn, 7)) + "\n")
+#             i += 1
+
+#     JFI_eng.close()
+
+#     return mean_difference_list, strd_dvtn_list
+
+# def write_to_files(curtail_string, fav_bud_string, limit_list, list_OfFractions, \
+# listof_JFIbud_lists, listof_JFIeng_lists, num_removed_list, eng_diff_listOf_lists, file_choice, budget, month_bud,\
+# percent_curt_listOf_lists, perc_bud_used_listOf_lists):
+
+#     #open files to write to, make chart
+#     JFI_eng = open("JFI_eng.txt", file_choice)
+#     JFI_eng.write(curtail_string + "\n" + fav_bud_string + "\n\n" + "(JFI budget, JFI energy)" + "\n" + \
+#     "(Increase in households w/ curtailment, Increase in kWh generated with curtailment)" + "\n" + "(Percent of excess energy curtailed, Average percent of budget used)" \
+#     + "\n" + "average monthly budget per house: $" + str(round(month_bud, 3)) + "\n" + "average daily budget per house: $" + str(round(budget, 3)))
+
+#     JFI_eng.write("\n________________________________________________________________________________________\n")
+#     JFI_eng.write("\t\t\t\t\t\tMax Energy\n\n\t\t")
+#     for i in limit_list:
+#         JFI_eng.write(str(i) + "\t\t\t")
+#     JFI_eng.write("\n\n")
+#     for f in range(len(listof_JFIbud_lists)):
+#         JFI_eng.write(str(round(list_OfFractions[f], 1)) + "\t\t")
+#         bud_list = listof_JFIbud_lists[f]
+#         eng_list = listof_JFIeng_lists[f]
+#         num_rem_list = num_removed_list[f]
+#         perc_curt_list = percent_curt_listOf_lists[f]
+#         energy_diff_list = eng_diff_listOf_lists[f]
+#         perc_bud_used_list = perc_bud_used_listOf_lists[f]
+#         for r in range(len(bud_list)):
+#             JFI_eng.write(str(round(bud_list[r], 4)) + ", " + str(round(eng_list[r], 4)) + "\t\t")
+#         JFI_eng.write("\n"  + "\t\t")
+#         for v in range(len(bud_list)):
+#             JFI_eng.write(str(round(num_rem_list[v], 4)) + ", " + str(round(energy_diff_list[v], 4)) + "\t\t")
+#         JFI_eng.write("\n"  + "\t\t")
+#         for t in range(len(perc_curt_list)):
+#             JFI_eng.write(str(round(perc_curt_list[t], 2)) + "%, " + str(round(perc_bud_used_list[t], 2)) + "%\t\t")
+
+#         #JFI_eng.write(energy_difference[])
+#         JFI_eng.write("\n\n")
+
+#     JFI_eng.close()
+#     # JFI_eng.write("With curtailment, an additional" + str(listof_newtoteng_lists[]) + "kWh of energy are generated")
+#     # JFI_eng.write("With curtailment" + str() + "households can have solar panels")
+
+
+#     # JFI_bud = open(r"C:\Users\Troy\Desktop\REU Project/JFI_bud.txt", "w")
+#     # JFI_bud.write("Average JFI of Budget Curtailed w/out Memory\n")
+#     # JFI_bud.write("_____________________________________\n\n")
+#     # JFI_bud.write("\t\t\t\t\t\tMax Energy\n\n")
+#     # JFI_bud.write("\t\t\t2000\t\t\t2500\t\t\t3000\t\t\t3500\t\t\t4000\t\t\t4500\t\t\t5000\n")
+#     # JFI_bud.write("\nStarting Budget  ")
+#     #
+#     #
+#     # # JFI_eng.write("\n\n\t\t  " + str(budget))
+#     # # JFI_bud.write("\n\n\t\t  " + str(budget))
+#     #
+#     #
+#     # JFI_eng.write("\t" + str(jains_eng))
+#     # JFI_bud.write("\t" + str(jains_bud)
+
+#     #JFI_bud.close()
+
+# #call main function
+# some kind of code
+
+main()
